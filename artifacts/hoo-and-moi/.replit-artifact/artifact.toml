@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "hoo-and-moi"
+description = "A React and Vite starter web application for hoo-and-moi, ready for building the product experience."
+version = "1.0.0"
+id = "artifacts/hoo-and-moi"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19275
+
+[services.development]
+run = "pnpm --filter @workspace/hoo-and-moi run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/hoo-and-moi", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/hoo-and-moi/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19275"
+BASE_PATH = "/"
