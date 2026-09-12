@@ -1,129 +1,50 @@
-import { type ReactNode } from 'react';
-import { ArrowUpRight, MoveRight } from 'lucide-react';
-import { useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ErrorBoundary } from '@/components/error-boundary';
-import { Toaster } from '@/components/ui/toaster';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import NotFound from '@/pages/not-found';
-import {
-  Route,
-  Switch,
-  useLocation,
-  Router as WouterRouter,
-} from 'wouter';
+import React, { useEffect, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import { ShoppingBag } from 'lucide-react';
 
-const queryClient = new QueryClient();
+// 1. 수파베이스 창고와 연결
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-function Home() {
-  const [hasBegun, setHasBegun] = useState(false);
+export default function App() {
+  const [products, setProducts] = useState<any[]>([]);
 
-  const begin = () => {
-    setHasBegun(true);
-    window.setTimeout(() => {
-      document.getElementById('the-beginning')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 40);
-  };
+  // 2. 창고에서 옷 꺼내오기
+  useEffect(() => {
+    async function fetchProducts() {
+      const { data } = await supabase.from('products').select('*');
+      if (data) setProducts(data);
+    }
+    fetchProducts();
+  }, []);
 
+  // 3. 후앤모아 쇼핑몰 화면
   return (
-    <main className={`hoo-page ${hasBegun ? 'hoo-begun' : ''}`} data-testid="page-welcome">
-      <div className="hoo-shell">
-        <nav className="hoo-nav" aria-label="Primary navigation" data-testid="navigation-primary">
-          <a className="hoo-mark" href="/" data-testid="link-brand-home" aria-label="hoo-and-moi home">
-            <span className="hoo-mark-dot" aria-hidden="true" />
-            <span data-testid="text-brand-name">hoo-and-moi</span>
-          </a>
-          <a className="hoo-nav-link" href="#the-beginning" data-testid="link-the-beginning">the beginning</a>
-          <button className="hoo-nav-action" type="button" onClick={begin} data-testid="button-nav-begin">
-            begin
-          </button>
-        </nav>
+    <div style={{ backgroundColor: '#FAF8F5', minHeight: '100vh', padding: '20px', fontFamily: 'sans-serif' }}>
 
-        <section className="hoo-hero" aria-labelledby="welcome-heading" data-testid="section-welcome">
-          <div>
-            <div className="hoo-kicker" data-testid="text-kicker">a place for what comes next</div>
-            <h1 className="hoo-title" id="welcome-heading" data-testid="heading-welcome">
-              hoo
-              <br />
-              <em data-testid="text-brand-moi">and moi</em>
-            </h1>
-            <p className="hoo-intro" data-testid="text-welcome-intro">
-              Nothing is decided yet. That is the point. This is a warm, open
-              starting line for something worth making.
-            </p>
-            <div className="hoo-hero-actions">
-              <button className="hoo-cta" type="button" onClick={begin} data-testid="button-begin">
-                {hasBegun ? 'you are here' : 'begin here'}
-                {hasBegun ? <ArrowUpRight size={16} aria-hidden="true" /> : <MoveRight size={16} aria-hidden="true" />}
-              </button>
-              <span className="hoo-local-status" role="status" aria-live="polite" data-testid="status-beginning">
-                {hasBegun ? 'a first step, kept locally.' : 'no account. no plan. just a start.'}
-              </span>
-            </div>
-          </div>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+        <h1 style={{ color: '#E5989B', fontSize: '26px', fontWeight: 'bold', margin: 0 }}>Hoo & Moi</h1>
+        <ShoppingBag color="#4A4A4A" size={28} />
+      </header>
 
-          <div className="hoo-orbit" aria-label="A playful mark for a product in progress" data-testid="display-orbit-mark">
-            <div className="hoo-orbit-note one" data-testid="text-orbit-note-one">make room<br />for wonder</div>
-            <div className="hoo-orbit-note two" data-testid="text-orbit-note-two">small start<br />big sky</div>
-            <div className="hoo-orbit-note three" data-testid="text-orbit-note-three">still becoming</div>
-            <div className="hoo-orbit-core" aria-hidden="true" data-testid="display-orbit-core">h<span>+</span>m</div>
-          </div>
-        </section>
-
-        <section className="hoo-manifesto" id="the-beginning" aria-labelledby="manifesto-heading" data-testid="section-manifesto">
-          <div>
-            <div className="hoo-eyebrow" data-testid="text-manifesto-eyebrow">01 / open field</div>
-            <h2 className="hoo-manifesto-title" id="manifesto-heading" data-testid="heading-manifesto">
-              A name before a map.
-            </h2>
-          </div>
-          <p className="hoo-manifesto-copy" data-testid="text-manifesto-copy">
-            hoo-and-moi is ready to hold the next idea, the next draft, the next
-            small brave thing. For now, it only asks one question: what do you
-            want to begin?
-          </p>
-        </section>
-
-        <footer className="hoo-footer" data-testid="footer-welcome">
-          <span className="hoo-footer-note" data-testid="text-footer-note">made for the first step</span>
-          <a className="hoo-link" href="#welcome-heading" data-testid="link-back-to-top">
-            back to top <ArrowUpRight size={13} aria-hidden="true" />
-          </a>
-        </footer>
+      <div style={{ marginBottom: '24px' }}>
+        <h2 style={{ color: '#4A4A4A', fontSize: '22px', margin: '0 0 8px 0' }}>우리아이를 위한 예쁜 옷 🎈</h2>
+        <p style={{ color: '#888', margin: 0, fontSize: '15px' }}>마음에 드는 상품을 골라 간편하게 주문해보세요.</p>
       </div>
-    </main>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+        {products.map((product) => (
+          <div key={product.id} style={{ backgroundColor: '#fff', borderRadius: '15px', padding: '12px', boxShadow: '0 4px 10px rgba(0,0,0,0.03)' }}>
+            <img src={product.main_image} alt={product.name} style={{ width: '100%', borderRadius: '10px', objectFit: 'cover', aspectRatio: '4/5' }} />
+            <h3 style={{ fontSize: '15px', color: '#4A4A4A', marginTop: '12px', marginBottom: '6px' }}>{product.name}</h3>
+            <p style={{ fontSize: '17px', fontWeight: 'bold', color: '#E5989B', margin: 0 }}>
+              {product.price.toLocaleString()}원
+            </p>
+          </div>
+        ))}
+      </div>
+
+    </div>
   );
 }
-
-function Router() {
-  return (
-    // Keep a shared shell (sidebar, navbar) outside the boundary so it
-    // survives a page crash.
-    <RoutedErrorBoundary>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route component={NotFound} />
-      </Switch>
-    </RoutedErrorBoundary>
-  );
-}
-
-function RoutedErrorBoundary({ children }: { children: ReactNode }) {
-  const [location] = useLocation();
-  return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
-}
-
-function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
-  );
-}
-
-export default App;
