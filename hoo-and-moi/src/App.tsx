@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download } from 'lucide-react';
+import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Link, TrendingUp } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -76,16 +76,23 @@ export default function App() {
   const [trackingInputs, setTrackingInputs] = useState<Record<string, string>>({});
   const [adminMemoInputs, setAdminMemoInputs] = useState<Record<string, string>>({});
 
+  // ✨ 상품 등록/수정용 상태
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [prodName, setProdName] = useState('');
-  const [prodPrice, setProdPrice] = useState('');
+  const [prodPrice, setProdPrice] = useState(''); // 소비자가 -> 쇼핑몰 판매가
+  const [prodCostPrice, setProdCostPrice] = useState(''); // 판매가 -> 쇼핑몰 매입원가 (비밀)
   const [prodDesc, setProdDesc] = useState(''); 
   const [prodSizes, setProdSizes] = useState(''); 
   const [prodColors, setProdColors] = useState(''); 
   const [prodCategory, setProdCategory] = useState(''); 
   const [prodBrand, setProdBrand] = useState('');
   const [prodFiles, setProdFiles] = useState<FileList | null>(null);
+  const [scrapedImageUrl, setScrapedImageUrl] = useState(''); // 외부 이미지 링크
   const [isUploading, setIsUploading] = useState(false);
+
+  // ✨ 도매 링크 크롤링용 상태
+  const [importUrl, setImportUrl] = useState('');
+  const [isFetchingUrl, setIsFetchingUrl] = useState(false);
 
   const [catLarge, setCatLarge] = useState('');
   const [catMedium, setCatMedium] = useState('');
@@ -166,7 +173,8 @@ export default function App() {
   const addToCart = () => {
     if (selectedProduct.sizes && !selectedSize) return alert("사이즈를 선택해주세요!");
     if (selectedProduct.colors && !selectedColor) return alert("색상을 선택해주세요!");
-    setCart([...cart, { ...selectedProduct, selectedSize, selectedColor, quantity, cartId: Date.now() }]);
+    // ✨ 장바구니에 담을 때 원가(cost_price)도 함께 기억해둡니다. (고객에겐 안보임)
+    setCart([...cart, { ...selectedProduct, selectedSize, selectedColor, quantity, cartId: Date.now(), cost_price: selectedProduct.cost_price || 0 }]);
     setShowCartModal(true); 
   };
   const removeFromCart = (cartId: number) => { setCart(cart.filter(item => item.cartId !== cartId)); };
@@ -191,7 +199,13 @@ export default function App() {
     if (newOrder && newOrder[0]) {
       const orderItems = cart.map(item => {
         const optionText = [item.selectedColor, item.selectedSize].filter(Boolean).join(' / ');
-        return { order_id: newOrder[0].id, product_name: `${item.name} ${optionText ? `(${optionText})` : ''}`, price: item.price, quantity: item.quantity };
+        return { 
+          order_id: newOrder[0].id, 
+          product_name: `${item.name} ${optionText ? `(${optionText})` : ''}`, 
+          price: item.price, 
+          quantity: item.quantity,
+          cost_price: item.cost_price // DB에 원가 저장!
+        };
       });
       await supabase.from('order_items').insert(orderItems);
       setCurrentOrder(newOrder[0]);
@@ -251,53 +265,63 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  const handleSaveNotice = async (status: boolean) => {
-    setIsNoticeUploading(true);
+  // ✨ 기린컴퍼니 도매 사이트 URL 크롤링 마법! ✨
+  const handleFetchUrlInfo = async () => {
+    if(!importUrl) return alert("도매 사이트 상품 링크를 입력해주세요.");
+    setIsFetchingUrl(true);
     try {
-      let imageUrl = notice?.image_url || null;
-      if (noticeFile) {
-        const fileName = `notice_${Date.now()}.${noticeFile.name.split('.').pop()}`;
-        await supabase.storage.from('products').upload(fileName, noticeFile);
-        const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-        imageUrl = data.publicUrl;
+      // 프록시 서버를 통해 외부 사이트의 HTML을 안전하게 긁어옵니다.
+      const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(importUrl)}`;
+      const res = await fetch(proxy);
+      const data = await res.json();
+      const doc = new DOMParser().parseFromString(data.contents, "text/html");
+
+      // 1. 상품명 가져오기
+      const titleMeta = doc.querySelector('meta[property="og:title"]')?.getAttribute('content');
+      if(titleMeta) setProdName(titleMeta);
+
+      // 2. 대표 이미지 가져오기 (외부 URL 그대로 저장)
+      const imgMeta = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
+      if(imgMeta) setScrapedImageUrl(imgMeta);
+
+      // 3. ⭐️ 아주 중요한 가격 분리 로직 ⭐️
+      // 기린컴퍼니(카페24) 구조: 소비자가(custom), 판매가(text)
+      const customPriceEl = doc.querySelector('#span_product_price_custom');
+      let retail = 0; // 소비자가
+      if(customPriceEl && customPriceEl.textContent) retail = parseInt(customPriceEl.textContent.replace(/[^0-9]/g, ''));
+
+      const normalPriceEl = doc.querySelector('#span_product_price_text');
+      let wholesale = 0; // 판매가(도매가)
+      if(normalPriceEl && normalPriceEl.textContent) wholesale = parseInt(normalPriceEl.textContent.replace(/[^0-9]/g, ''));
+
+      // 소비자가 -> 우리의 판매가 (고객 노출)
+      if(retail > 0) {
+        setProdPrice(retail.toString());
+      } else if(wholesale > 0) {
+        // 만약 소비자가가 안 적힌 상품이면 판매가에 마진을 더해서 추천 (예: 1.6배)
+        setProdPrice(Math.floor(wholesale * 1.6).toString()); 
       }
-      const { error } = await supabase.from('notices').upsert([{ id: 1, content: noticeInput, image_url: imageUrl, is_active: status }]);
-      if (error) throw error;
-      alert(`공지사항이 ${status ? '팝업 활성화' : '팝업 숨김'} 처리되었습니다.`); fetchNoticesAndBanner();
-    } catch (error: any) { alert("공지 저장 실패: " + error.message); }
-    finally { setIsNoticeUploading(false); }
-  };
 
-  const handleSaveMainBanner = async () => {
-    if (!bannerFile) return alert("배너 이미지를 첨부해주세요.");
-    setIsBannerUploading(true);
-    try {
-      const fileName = `banner_${Date.now()}.${bannerFile.name.split('.').pop()}`;
-      await supabase.storage.from('products').upload(fileName, bannerFile);
-      const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-      const { error } = await supabase.from('notices').upsert([{ id: 2, image_url: data.publicUrl, is_active: true }]);
-      if (error) throw error;
-      alert("메인 배너가 성공적으로 적용되었습니다!"); setBannerFile(null); fetchNoticesAndBanner();
-    } catch (error: any) { alert("배너 저장 실패: " + error.message); }
-    finally { setIsBannerUploading(false); }
-  };
+      // 판매가 -> 우리의 매입가 (비밀 원가)
+      if(wholesale > 0) setProdCostPrice(wholesale.toString());
 
-  const addCategory = async () => { 
-    const fullName = [catLarge, catMedium].filter(Boolean).join(' > ');
-    if(!fullName) return alert("대분류를 하나 이상 입력해주세요.");
-    await supabase.from('categories').insert([{ name: fullName }]); 
-    setCatLarge(''); setCatMedium(''); fetchCategories(); 
+      alert("데이터를 성공적으로 불러왔습니다! 가격이 맞게 들어왔는지 한 번 더 확인해주세요.");
+    } catch(e) {
+      alert("데이터를 불러오지 못했습니다. 링크가 정확한지 확인하시거나 직접 입력해주세요.");
+    } finally {
+      setIsFetchingUrl(false);
+    }
   };
-  const deleteCategory = async (id: number) => { if (window.confirm("삭제하시겠습니까?")) { await supabase.from('categories').delete().eq('id', id); fetchCategories(); } };
-  const addBrand = async () => { if(newBrand) { await supabase.from('brands').insert([{ name: newBrand }]); setNewBrand(''); fetchBrands(); } };
-  const deleteBrand = async (id: number) => { if (window.confirm("삭제하시겠습니까?")) { await supabase.from('brands').delete().eq('id', id); fetchBrands(); } };
 
   const handleSaveProduct = async () => {
-    if (!prodName || !prodPrice) return alert("상품명, 가격은 필수입니다!");
-    if (!editingProductId && (!prodFiles || prodFiles.length === 0)) return alert("새 상품 등록 시 사진은 필수입니다!");
+    if (!prodName || !prodPrice) return alert("상품명, 판매 가격은 필수입니다!");
+    if (!editingProductId && (!prodFiles || prodFiles.length === 0) && !scrapedImageUrl) return alert("새 상품 등록 시 사진은 필수입니다!");
     setIsUploading(true);
     try {
-      let main_image = undefined; let sub_images = undefined;
+      let main_image = scrapedImageUrl || undefined; 
+      let sub_images = undefined;
+
+      // 직접 사진을 첨부한 경우 (크롤링 이미지보다 우선)
       if (prodFiles && prodFiles.length > 0) {
         const imageUrls = [];
         for (let i = 0; i < prodFiles.length; i++) {
@@ -307,11 +331,25 @@ export default function App() {
           const { data } = supabase.storage.from('products').getPublicUrl(fileName);
           imageUrls.push(data.publicUrl);
         }
-        main_image = imageUrls[0]; sub_images = imageUrls.slice(1).join(',') || null;
+        main_image = imageUrls[0]; 
+        sub_images = imageUrls.slice(1).join(',') || null;
       }
 
-      const productData: any = { name: prodName, price: parseInt(prodPrice), category: prodCategory, brand: prodBrand, description: prodDesc, sizes: prodSizes, colors: prodColors };
-      if (main_image) { productData.main_image = main_image; productData.sub_images = sub_images; }
+      const productData: any = { 
+        name: prodName, 
+        price: parseInt(prodPrice), 
+        cost_price: parseInt(prodCostPrice) || 0, // 매입원가 저장!
+        category: prodCategory, 
+        brand: prodBrand, 
+        description: prodDesc, 
+        sizes: prodSizes, 
+        colors: prodColors 
+      };
+
+      if (main_image) { 
+        productData.main_image = main_image; 
+        if (sub_images) productData.sub_images = sub_images; 
+      }
 
       if (editingProductId) {
         const { error } = await supabase.from('products').update(productData).eq('id', editingProductId);
@@ -326,14 +364,38 @@ export default function App() {
   };
 
   const resetProductForm = () => {
-    setEditingProductId(null); setProdName(''); setProdPrice(''); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null);
+    setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setScrapedImageUrl(''); setImportUrl('');
   };
   const openEditProduct = (p: any) => {
-    setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setAdminTab('productAdd');
+    setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setScrapedImageUrl(p.main_image || ''); setAdminTab('productAdd');
   };
   const deleteProduct = async (id: string) => {
     if (window.confirm("❗이 상품을 완전히 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); }
   };
+
+  // ✨ 대시보드 통계 계산 로직 ✨
+  const calculateStats = () => {
+    // 결제완료, 배송지연, 발송완료 상태인 '실제 매출' 주문만 골라냅니다.
+    const validOrders = adminOrders.filter(o => ['결제완료', '배송지연', '발송완료'].includes(o.status));
+    
+    let totalSales = 0; // 총매출
+    let totalCost = 0;  // 총 매입원가
+    let totalShipping = validOrders.length * 3500; // 배송비 마진 (간략화)
+
+    validOrders.forEach(order => {
+      totalSales += order.total_amount;
+      if(order.order_items) {
+        order.order_items.forEach((item: any) => {
+          totalCost += (item.cost_price || 0) * item.quantity;
+        });
+      }
+    });
+
+    const netProfit = totalSales - totalCost; // 순수익
+
+    return { totalSales, totalCost, netProfit, orderCount: validOrders.length };
+  };
+  const stats = calculateStats();
 
   const getCombinedCategories = () => {
     const tree: Record<string, string[]> = JSON.parse(JSON.stringify(BASE_CATEGORIES));
@@ -369,7 +431,6 @@ export default function App() {
   const filteredAdminOrders = adminOrders.filter(o => adminFilter === '전체' ? true : adminFilter === '취소/환불' ? (o.status === '주문취소' || o.status === '환불처리') : o.status === adminFilter);
 
   return (
-    // ✨ 수정됨: paddingBottom을 110px로 늘려서 메뉴바에 콘텐츠가 가려지지 않게 함
     <div style={{ backgroundColor: THEME.bg, minHeight: '100vh', fontFamily: "'Pretendard', 'Noto Sans KR', sans-serif", paddingBottom: '110px', color: THEME.text }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&display=swap');
@@ -832,13 +893,41 @@ export default function App() {
       )}
 
       {currentView === 'admin' && (
-        <div style={{ padding: '20px' }}>
+        <div style={{ padding: '20px', paddingBottom: '100px' }}>
+          {/* ✨ 관리자 상단 탭 메뉴에 [대시보드] 추가 ✨ */}
           <div style={{ display: 'flex', borderBottom: `2px solid ${THEME.border}`, marginBottom: '20px', overflowX: 'auto', scrollbarWidth: 'none' }}>
             <div onClick={() => setAdminTab('orders')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'orders' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'orders' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>주문 관리</div>
             <div onClick={() => { setAdminTab('productAdd'); resetProductForm(); }} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'productAdd' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'productAdd' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>상품 등록</div>
             <div onClick={() => setAdminTab('productEdit')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'productEdit' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'productEdit' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>상품 수정</div>
-            <div onClick={() => setAdminTab('settings')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'settings' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'settings' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>카테고리/공지</div>
+            <div onClick={() => setAdminTab('settings')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'settings' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'settings' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>설정</div>
+            <div onClick={() => setAdminTab('dashboard')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'dashboard' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'dashboard' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>매출/수익</div>
           </div>
+
+          {/* ✨ 1. 매출/수익 대시보드 탭 ✨ */}
+          {adminTab === 'dashboard' && (
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '15px' }}>통계 대시보드 (진행중인 주문)</h3>
+              <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>결제완료/배송지연/발송완료 상태의 주문만 합산됩니다.</p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+                <div style={{ backgroundColor: THEME.primary, color: 'white', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>
+                  <p style={{ fontSize: '13px', margin: '0 0 10px 0', opacity: 0.9 }}>총매출 (판매가 기준)</p>
+                  <p style={{ fontSize: '22px', fontWeight: 'bold', margin: 0 }}>{stats.totalSales.toLocaleString()}원</p>
+                </div>
+                <div style={{ backgroundColor: '#fff', border: `1px solid ${THEME.border}`, padding: '20px', borderRadius: '16px' }}>
+                  <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 10px 0' }}>총 매입원가</p>
+                  <p style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: THEME.text }}>{stats.totalCost.toLocaleString()}원</p>
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: '#fff', border: `2px solid ${THEME.primary}`, padding: '25px', borderRadius: '16px', textAlign: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}><TrendingUp color={THEME.primary} size={30} /></div>
+                <p style={{ fontSize: '14px', color: THEME.subText, margin: '0 0 5px 0' }}>순수익 (총매출 - 총원가)</p>
+                <p style={{ fontSize: '28px', fontWeight: 'bold', color: THEME.primary, margin: 0 }}>{stats.netProfit.toLocaleString()}원</p>
+                <p style={{ fontSize: '12px', color: '#ccc', marginTop: '10px' }}>* 실제 통장 입금액과 배송비 마진에 따라 약간의 차이가 있을 수 있습니다.</p>
+              </div>
+            </div>
+          )}
 
           {adminTab === 'orders' && (
             <div>
@@ -906,12 +995,36 @@ export default function App() {
 
           {adminTab === 'productAdd' && (
             <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
+              
+              {/* ✨ 2. 기린컴퍼니 도매 사이트 링크 입력창 추가 ✨ */}
+              {!editingProductId && (
+                <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
+                  <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Link size={16} /> 도매 사이트 상품 불러오기
+                  </p>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <input placeholder="상품 링크 복사 후 붙여넣기" value={importUrl} onChange={e => setImportUrl(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px' }} />
+                    <button onClick={handleFetchUrlInfo} disabled={isFetchingUrl} style={{ padding: '0 15px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                      {isFetchingUrl ? '로딩중..' : '불러오기'}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '11px', color: THEME.subText, marginTop: '8px' }}>* 카페24 기반(기린 등) 도매 사이트 링크를 입력하면 이름, 사진, 가격(소비자가/도매가)을 자동 분류하여 가져옵니다.</p>
+                </div>
+              )}
+
               <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '350px', backgroundColor: THEME.bg, cursor: 'pointer' }}>
-                <ImagePlus color={THEME.subText} size={50} />
-                <span style={{ marginTop: '20px', fontSize: '15px', color: THEME.subText, fontWeight: 'bold' }}>{editingProductId ? '사진을 다시 올리면 교체됩니다' : '상품 사진 첨부 (여러장)'}</span>
-                {prodFiles && <span style={{ marginTop: '10px', fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{prodFiles.length}장 선택됨</span>}
-                <input type="file" accept="image/*" multiple onChange={(e) => setProdFiles(e.target.files)} style={{ display: 'none' }} />
+                {scrapedImageUrl ? (
+                  <img src={scrapedImageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <>
+                    <ImagePlus color={THEME.subText} size={50} />
+                    <span style={{ marginTop: '20px', fontSize: '15px', color: THEME.subText, fontWeight: 'bold' }}>{editingProductId ? '사진을 다시 올리면 교체됩니다' : '상품 사진 직접 첨부 (선택)'}</span>
+                    {prodFiles && <span style={{ marginTop: '10px', fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{prodFiles.length}장 선택됨</span>}
+                  </>
+                )}
+                <input type="file" accept="image/*" multiple onChange={(e) => { setProdFiles(e.target.files); setScrapedImageUrl(''); }} style={{ display: 'none' }} />
               </label>
+              
               <div style={{ padding: '25px 20px' }}>
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
                   <select value={prodBrand} onChange={e => setProdBrand(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }}>
@@ -924,7 +1037,18 @@ export default function App() {
                   </select>
                 </div>
                 <input placeholder="상품명을 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ width: '100%', fontSize: '24px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '15px', marginBottom: '20px', outline: 'none' }} />
-                <input type="number" placeholder="판매 가격 (숫자)" value={prodPrice} onChange={e => setProdPrice(e.target.value)} style={{ width: '100%', fontSize: '20px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '15px', marginBottom: '25px', outline: 'none' }} />
+                
+                <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '12px', color: THEME.primary, fontWeight: 'bold', marginBottom: '5px' }}>고객 판매가 (소비자가)</p>
+                    <input type="number" placeholder="예: 25000" value={prodPrice} onChange={e => setProdPrice(e.target.value)} style={{ width: '100%', fontSize: '18px', fontWeight: 'bold', border: 'none', borderBottom: `2px solid ${THEME.primary}`, paddingBottom: '10px', outline: 'none' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '12px', color: THEME.subText, fontWeight: 'bold', marginBottom: '5px' }}>비밀 매입원가 (도매가)</p>
+                    <input type="number" placeholder="예: 15000" value={prodCostPrice} onChange={e => setProdCostPrice(e.target.value)} style={{ width: '100%', fontSize: '18px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '10px', outline: 'none', color: THEME.subText }} />
+                  </div>
+                </div>
+
                 <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>옵션 입력 (선택사항 / 쉼표로 구분)</p>
                 <input placeholder="색상 (예: 핑크, 네이비)" value={prodColors} onChange={e => setProdColors(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '15px', fontSize: '14px' }} />
                 <input placeholder="사이즈 (예: S, M, L)" value={prodSizes} onChange={e => setProdSizes(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '25px', fontSize: '14px' }} />
@@ -946,7 +1070,8 @@ export default function App() {
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                     <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 6px 0' }}>{p.brand}</p>
                     <p style={{ fontSize: '16px', fontWeight: 'bold', margin: '0 0 6px 0' }}>{p.name}</p>
-                    <p style={{ fontSize: '15px', color: THEME.text, margin: '0 0 15px 0' }}>{p.price.toLocaleString()}원</p>
+                    <p style={{ fontSize: '15px', color: THEME.text, margin: '0 0 5px 0' }}>판매가: {p.price.toLocaleString()}원</p>
+                    <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 15px 0' }}>매입원가: {(p.cost_price || 0).toLocaleString()}원</p>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button onClick={() => openEditProduct(p)} style={{ flex: 1, padding: '8px', backgroundColor: THEME.text, color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', fontWeight: 'bold' }}><Edit size={14} /> 수정</button>
                       <button onClick={() => deleteProduct(p.id)} style={{ flex: 1, padding: '8px', backgroundColor: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', fontWeight: 'bold' }}><Trash2 size={14} /> 삭제</button>
@@ -1020,7 +1145,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ✨ 수정됨: 하단 여백(paddingBottom)을 늘려서 아이폰 하단 바와 겹치지 않게 조절 */}
       {currentView !== 'detail' && currentView !== 'quotationPreview' && currentView !== 'orderComplete' && (
         <div style={{ position: 'fixed', bottom: 0, width: '100%', backgroundColor: '#fff', display: 'flex', borderTop: `1px solid ${THEME.border}`, paddingTop: '10px', paddingBottom: 'calc(env(safe-area-inset-bottom, 20px) + 15px)', zIndex: 100 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'home' ? THEME.primary : THEME.subText, cursor: 'pointer' }} onClick={() => setCurrentView('home')}>
