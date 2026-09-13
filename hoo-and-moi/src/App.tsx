@@ -43,27 +43,27 @@ export default function App() {
   const [showCartModal, setShowCartModal] = useState(false);
 
   const [activeBrand, setActiveBrand] = useState('전체');
-  const [activeCategory, setActiveCategory] = useState('전체');
 
-  // 🌟 공지사항 & 메인 배너 🌟
+  // 🌟 카테고리 대분류/중분류 상태 분리 (수정됨) 🌟
+  const [activeLargeCat, setActiveLargeCat] = useState('전체');
+  const [activeSmallCat, setActiveSmallCat] = useState('전체');
+
   const [notice, setNotice] = useState<any>(null);
   const [showNoticeModal, setShowNoticeModal] = useState(false);
   const [noticeInput, setNoticeInput] = useState('');
   const [noticeFile, setNoticeFile] = useState<File | null>(null);
   const [isNoticeUploading, setIsNoticeUploading] = useState(false);
 
-  const [mainBannerUrl, setMainBannerUrl] = useState(''); // 메인 배너 주소
+  const [mainBannerUrl, setMainBannerUrl] = useState('');
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [isBannerUploading, setIsBannerUploading] = useState(false);
 
-  // 주문 폼
   const [orderName, setOrderName] = useState('');
   const [orderPhone, setOrderPhone] = useState('');
   const [orderAddress, setOrderAddress] = useState('');
   const [orderMemo, setOrderMemo] = useState('');
   const [currentOrder, setCurrentOrder] = useState<any>(null);
 
-  // 주문 조회
   const [lookupName, setLookupName] = useState('');
   const [lookupPhone, setLookupPhone] = useState('');
   const [lookupOrderNumber, setLookupOrderNumber] = useState(''); 
@@ -71,7 +71,6 @@ export default function App() {
   const [editingCustomerOrderId, setEditingCustomerOrderId] = useState<string | null>(null);
   const [editOrderInputs, setEditOrderInputs] = useState({ name: '', phone: '', address: '', memo: '' });
 
-  // 관리자
   const [adminPassword, setAdminPassword] = useState('');
   const [adminTab, setAdminTab] = useState('orders'); 
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
@@ -80,7 +79,6 @@ export default function App() {
   const [trackingInputs, setTrackingInputs] = useState<Record<string, string>>({});
   const [adminMemoInputs, setAdminMemoInputs] = useState<Record<string, string>>({});
 
-  // 상품 등록/수정
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [prodName, setProdName] = useState('');
   const [prodPrice, setProdPrice] = useState('');
@@ -103,22 +101,16 @@ export default function App() {
     fetchNoticesAndBanner();
   }, []);
 
-  // 🌟 공지사항 & 메인 배너 한 번에 불러오기 🌟
   const fetchNoticesAndBanner = async () => {
-    // id=1은 공지사항 팝업, id=2는 메인 배너 이미지로 사용
     const { data } = await supabase.from('notices').select('*').in('id', [1, 2]);
     if (data) {
       const popup = data.find((d:any) => d.id === 1);
       const banner = data.find((d:any) => d.id === 2);
-
       if (popup) {
-        setNotice(popup);
-        setNoticeInput(popup.content || '');
+        setNotice(popup); setNoticeInput(popup.content || '');
         if (popup.is_active) setShowNoticeModal(true); 
       }
-      if (banner && banner.image_url) {
-        setMainBannerUrl(banner.image_url);
-      }
+      if (banner && banner.image_url) setMainBannerUrl(banner.image_url);
     }
   };
 
@@ -205,7 +197,6 @@ export default function App() {
       let query = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false });
       if (lookupOrderNumber) query = query.eq('order_number', lookupOrderNumber);
       else query = query.eq('customer_name', lookupName).eq('phone', lookupPhone);
-
       const { data, error } = await query;
       if (error) throw error;
       if (data && data.length > 0) setMyOrders(data); 
@@ -219,9 +210,7 @@ export default function App() {
   };
   const saveCustomerEdit = async (id: string) => {
     await supabase.from('orders').update({ customer_name: editOrderInputs.name, phone: editOrderInputs.phone, address: editOrderInputs.address, memo: editOrderInputs.memo }).eq('id', id);
-    alert("배송지 정보가 수정되었습니다.");
-    setEditingCustomerOrderId(null);
-    searchMyOrder();
+    alert("배송지 정보가 수정되었습니다."); setEditingCustomerOrderId(null); searchMyOrder();
   };
 
   const fetchAdminOrders = async () => {
@@ -244,7 +233,6 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  // 🌟 공지사항 팝업 저장 로직 🌟
   const handleSaveNotice = async (status: boolean) => {
     setIsNoticeUploading(true);
     try {
@@ -255,17 +243,13 @@ export default function App() {
         const { data } = supabase.storage.from('products').getPublicUrl(fileName);
         imageUrl = data.publicUrl;
       }
-
       const { error } = await supabase.from('notices').upsert([{ id: 1, content: noticeInput, image_url: imageUrl, is_active: status }]);
       if (error) throw error;
-
-      alert(`공지사항이 ${status ? '팝업 활성화' : '팝업 숨김'} 처리되었습니다.`);
-      fetchNoticesAndBanner();
+      alert(`공지사항이 ${status ? '팝업 활성화' : '팝업 숨김'} 처리되었습니다.`); fetchNoticesAndBanner();
     } catch (error: any) { alert("공지 저장 실패: " + error.message); }
     finally { setIsNoticeUploading(false); }
   };
 
-  // 🌟 메인 배너 저장 로직 🌟
   const handleSaveMainBanner = async () => {
     if (!bannerFile) return alert("배너 이미지를 첨부해주세요.");
     setIsBannerUploading(true);
@@ -273,13 +257,9 @@ export default function App() {
       const fileName = `banner_${Date.now()}.${bannerFile.name.split('.').pop()}`;
       await supabase.storage.from('products').upload(fileName, bannerFile);
       const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-
       const { error } = await supabase.from('notices').upsert([{ id: 2, image_url: data.publicUrl, is_active: true }]);
       if (error) throw error;
-
-      alert("메인 배너가 성공적으로 적용되었습니다!");
-      setBannerFile(null);
-      fetchNoticesAndBanner();
+      alert("메인 배너가 성공적으로 적용되었습니다!"); setBannerFile(null); fetchNoticesAndBanner();
     } catch (error: any) { alert("배너 저장 실패: " + error.message); }
     finally { setIsBannerUploading(false); }
   };
@@ -317,17 +297,12 @@ export default function App() {
 
       if (editingProductId) {
         const { error } = await supabase.from('products').update(productData).eq('id', editingProductId);
-        if(error) throw error;
-        alert("✅ 상품 수정 완료!");
+        if(error) throw error; alert("✅ 상품 수정 완료!");
       } else {
         const { error } = await supabase.from('products').insert([productData]);
-        if(error) throw error;
-        alert("🎉 새 상품 등록 완료!");
+        if(error) throw error; alert("🎉 새 상품 등록 완료!");
       }
-
-      resetProductForm(); 
-      await fetchProducts(); 
-      setAdminTab('productEdit');
+      resetProductForm(); await fetchProducts(); setAdminTab('productEdit');
     } catch (err: any) { alert("오류 발생: " + err.message); } 
     finally { setIsUploading(false); }
   };
@@ -357,10 +332,25 @@ export default function App() {
   };
   const categoryTree = getCombinedCategories();
 
+  // 🌟 검색 및 카테고리 필터링 로직 강화 🌟
   const displayProducts = products.filter(p => {
     const matchBrand = activeBrand === '전체' || p.brand === activeBrand;
-    const matchCategory = activeCategory === '전체' || (p.category && p.category.includes(activeCategory));
-    const matchSearch = p.name.includes(searchQuery) || (p.brand && p.brand.includes(searchQuery));
+
+    // 카테고리 필터
+    let matchCategory = true;
+    if (activeLargeCat !== '전체') {
+      if (activeSmallCat !== '전체') {
+        matchCategory = p.category === `${activeLargeCat} > ${activeSmallCat}`;
+      } else {
+        matchCategory = p.category && p.category.startsWith(activeLargeCat);
+      }
+    }
+
+    // 띄어쓰기 무시 및 대소문자 무시 검색 적용
+    const normalize = (str: string) => (str || '').replace(/\s+/g, '').toLowerCase();
+    const normalizedQuery = normalize(searchQuery);
+    const matchSearch = !normalizedQuery || normalize(p.name).includes(normalizedQuery) || normalize(p.brand).includes(normalizedQuery);
+
     return matchBrand && matchCategory && matchSearch;
   });
 
@@ -377,7 +367,6 @@ export default function App() {
         input:focus, textarea:focus { border-color: ${THEME.primary} !important; }
       `}</style>
 
-      {/* 🌟 공지사항 팝업 모달 🌟 */}
       {showNoticeModal && notice && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(2px)' }}>
           <div style={{ backgroundColor: '#fff', borderRadius: '20px', width: '85%', maxWidth: '400px', overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
@@ -391,12 +380,10 @@ export default function App() {
         </div>
       )}
 
-      {/* 헤더 */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
         <div style={{ width: '28px' }}>
            {currentView !== 'home' && <ChevronLeft size={28} onClick={() => setCurrentView('home')} style={{ cursor: 'pointer', color: THEME.text }}/>}
         </div>
-        {/* 중앙 로고 배치 (포크칩스 느낌) */}
         <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '26px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer' }} onClick={() => setCurrentView('home')}>Hoo & Moi</h1>
         <div style={{ position: 'relative', cursor: 'pointer', width: '28px' }} onClick={() => setCurrentView('cart')}>
           <ShoppingBag size={24} color={THEME.text} />
@@ -404,25 +391,19 @@ export default function App() {
         </div>
       </header>
 
-      {/* --- 1. 홈 화면 --- */}
       {currentView === 'home' && (
         <div>
-          {/* 상단 안내 문구 */}
           <div style={{ padding: '30px 20px 0 20px', textAlign: 'center' }}>
             <p className="serif-text" style={{ color: THEME.brown, fontSize: '17px', marginBottom: '20px', lineHeight: '1.5' }}>매일매일 입고 싶은 옷,<br/>고민 없이 후앤모아 🎈</p>
-
             <p className="serif-text" style={{ color: THEME.brown, fontSize: '14px', marginBottom: '30px' }}>편안함에 감성을 더한<br/>우리 아이 맞춤 옷장🎀</p>
           </div>
 
           <div style={{ padding: '0 20px 20px 20px' }}>
-            {/* 🌟 메인 배너 (관리자 등록) 🌟 */}
             <div style={{ width: '100%', borderRadius: '20px', overflow: 'hidden', marginBottom: '20px', backgroundColor: '#fff', boxShadow: '0 4px 15px rgba(0,0,0,0.04)' }}>
                {mainBannerUrl ? (
                  <img src={mainBannerUrl} alt="후앤모아 배너" style={{ width: '100%', display: 'block', objectFit: 'cover' }} />
                ) : (
-                 <div style={{ padding: '40px 20px', textAlign: 'center', backgroundColor: '#f9f9f9', color: THEME.subText, fontSize: '13px' }}>
-                    관리자 탭에서 메인 배너를 등록해주세요.
-                 </div>
+                 <div style={{ padding: '40px 20px', textAlign: 'center', backgroundColor: '#f9f9f9', color: THEME.subText, fontSize: '13px' }}>관리자 탭에서 메인 배너를 등록해주세요.</div>
                )}
             </div>
 
@@ -431,19 +412,28 @@ export default function App() {
               <Search size={18} color={THEME.subText} style={{ position: 'absolute', left: '15px', top: '14px' }} />
             </div>
 
-            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '20px', scrollbarWidth: 'none' }}>
-              <button onClick={() => setActiveCategory('전체')} style={{ padding: '8px 18px', borderRadius: '20px', fontSize: '14px', fontWeight: activeCategory === '전체' ? 'bold' : 'normal', border: activeCategory === '전체' ? 'none' : `1px solid ${THEME.border}`, backgroundColor: activeCategory === '전체' ? THEME.primary : '#fff', color: activeCategory === '전체' ? 'white' : THEME.text, whiteSpace: 'nowrap', transition: '0.2s' }}>전체</button>
-              {categories.map(c => (
-                <button key={c.id} onClick={() => setActiveCategory(c.name)} style={{ padding: '8px 18px', borderRadius: '20px', fontSize: '14px', fontWeight: activeCategory === c.name ? 'bold' : 'normal', border: activeCategory === c.name ? 'none' : `1px solid ${THEME.border}`, backgroundColor: activeCategory === c.name ? THEME.primary : '#fff', color: activeCategory === c.name ? 'white' : THEME.text, whiteSpace: 'nowrap', transition: '0.2s' }}>{c.name.split('>').pop()?.trim()}</button>
+            {/* 🌟 1. 카테고리 대/중분류 분리 (수정됨) 🌟 */}
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '10px', scrollbarWidth: 'none' }}>
+              <button onClick={() => { setActiveLargeCat('전체'); setActiveSmallCat('전체'); }} style={{ padding: '8px 18px', borderRadius: '20px', fontSize: '14px', fontWeight: activeLargeCat === '전체' ? 'bold' : 'normal', border: activeLargeCat === '전체' ? 'none' : `1px solid ${THEME.border}`, backgroundColor: activeLargeCat === '전체' ? THEME.primary : '#fff', color: activeLargeCat === '전체' ? 'white' : THEME.text, whiteSpace: 'nowrap', transition: '0.2s' }}>전체</button>
+              {Object.keys(categoryTree).map(main => (
+                <button key={main} onClick={() => { setActiveLargeCat(main); setActiveSmallCat('전체'); }} style={{ padding: '8px 18px', borderRadius: '20px', fontSize: '14px', fontWeight: activeLargeCat === main ? 'bold' : 'normal', border: activeLargeCat === main ? 'none' : `1px solid ${THEME.border}`, backgroundColor: activeLargeCat === main ? THEME.primary : '#fff', color: activeLargeCat === main ? 'white' : THEME.text, whiteSpace: 'nowrap', transition: '0.2s' }}>{main}</button>
               ))}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            {activeLargeCat !== '전체' && categoryTree[activeLargeCat] && categoryTree[activeLargeCat].length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '20px', scrollbarWidth: 'none' }}>
+                <button onClick={() => setActiveSmallCat('전체')} style={{ padding: '6px 14px', borderRadius: '15px', fontSize: '13px', fontWeight: activeSmallCat === '전체' ? 'bold' : 'normal', border: `1px solid ${activeSmallCat === '전체' ? THEME.primary : THEME.border}`, backgroundColor: activeSmallCat === '전체' ? THEME.primaryLight : '#fff', color: activeSmallCat === '전체' ? THEME.primary : THEME.subText, whiteSpace: 'nowrap' }}>전체보기</button>
+                {categoryTree[activeLargeCat].map((sub: string) => (
+                  <button key={sub} onClick={() => setActiveSmallCat(sub)} style={{ padding: '6px 14px', borderRadius: '15px', fontSize: '13px', fontWeight: activeSmallCat === sub ? 'bold' : 'normal', border: `1px solid ${activeSmallCat === sub ? THEME.primary : THEME.border}`, backgroundColor: activeSmallCat === sub ? THEME.primaryLight : '#fff', color: activeSmallCat === sub ? THEME.primary : THEME.subText, whiteSpace: 'nowrap' }}>{sub}</button>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginTop: '10px' }}>
               {displayProducts.map((p) => (
                 <div key={p.id} onClick={() => openProductDetail(p)} style={{ cursor: 'pointer' }}>
                   <div style={{ position: 'relative', marginBottom: '12px' }}>
                     <img src={p.main_image} style={{ width: '100%', borderRadius: '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee' }} />
-                    {/* ✨ NEW 뱃지 복원 ✨ */}
                     {isNewProduct(p.created_at) && <span style={{ position: 'absolute', top: '8px', left: '8px', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', boxShadow: '0 2px 5px rgba(240,106,125,0.3)' }}>✨ NEW</span>}
                   </div>
                   <p style={{ fontSize: '12px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 4px 0' }}>{p.brand || '자체제작'}</p>
@@ -457,7 +447,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 1-2. 카테고리 --- */}
       {currentView === 'category' && (
         <div style={{ padding: '20px' }}>
           <h2 style={{ fontSize: '20px', marginBottom: '20px', fontWeight: 'bold' }}>전체 카테고리</h2>
@@ -474,7 +463,7 @@ export default function App() {
 
           <div style={{ backgroundColor: '#fff', borderRadius: '15px', padding: '10px', boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}>
             <h3 style={{ fontSize: '15px', color: THEME.primary, padding: '10px', borderBottom: `1px solid ${THEME.border}`, fontWeight: 'bold' }}>아이템별</h3>
-            <div onClick={() => { setActiveCategory('전체'); setCurrentView('home'); }} style={{ padding: '15px 10px', borderBottom: `1px solid ${THEME.border}`, fontSize: '15px', cursor: 'pointer', fontWeight: 'bold' }}>모든 상품 보기</div>
+            <div onClick={() => { setActiveLargeCat('전체'); setActiveSmallCat('전체'); setCurrentView('home'); }} style={{ padding: '15px 10px', borderBottom: `1px solid ${THEME.border}`, fontSize: '15px', cursor: 'pointer', fontWeight: 'bold' }}>모든 상품 보기</div>
             {Object.keys(categoryTree).map(mainCat => (
               <div key={mainCat}>
                 <div onClick={() => setExpandedCats({...expandedCats, [mainCat]: !expandedCats[mainCat]})} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 10px', borderBottom: `1px solid ${THEME.border}`, fontSize: '15px', cursor: 'pointer' }}>
@@ -483,9 +472,9 @@ export default function App() {
                 </div>
                 {expandedCats[mainCat] && (
                   <div style={{ padding: '10px 10px 10px 20px', backgroundColor: '#FCFCFC' }}>
-                    <div onClick={() => { setActiveCategory(mainCat); setCurrentView('home'); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>{mainCat} 전체</div>
+                    <div onClick={() => { setActiveLargeCat(mainCat); setActiveSmallCat('전체'); setCurrentView('home'); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>{mainCat} 전체</div>
                     {categoryTree[mainCat].map((sub: string) => (
-                      <div key={sub} onClick={() => { setActiveCategory(sub); setCurrentView('home'); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>- {sub}</div>
+                      <div key={sub} onClick={() => { setActiveLargeCat(mainCat); setActiveSmallCat(sub); setCurrentView('home'); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>- {sub}</div>
                     ))}
                   </div>
                 )}
@@ -495,7 +484,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 2. 상품 상세 --- */}
       {currentView === 'detail' && selectedProduct && (
         <div style={{ paddingBottom: '100px', backgroundColor: '#fff' }}>
           <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', scrollbarWidth: 'none' }}>
@@ -570,7 +558,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 3. 장바구니 --- */}
       {currentView === 'cart' && (
         <div style={{ padding: '20px', backgroundColor: '#fff', minHeight: '100vh' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
@@ -615,7 +602,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 4. 주문 폼 --- */}
       {currentView === 'orderForm' && (
         <div style={{ padding: '20px', backgroundColor: '#fff', minHeight: '100vh' }}>
           <h2 style={{ fontSize: '20px', marginBottom: '25px', fontWeight: 'bold' }}>주문자 정보</h2>
@@ -643,7 +629,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 4-1. 주문 견적서 --- */}
       {currentView === 'quotationPreview' && (
         <div style={{ padding: '20px', backgroundColor: '#fff', minHeight: '100vh' }}>
           <h2 style={{ fontSize: '18px', fontWeight: 'bold', textAlign: 'center', marginBottom: '30px' }}>주문 견적서</h2>
@@ -690,10 +675,12 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 4-2. 주문 완료 --- */}
       {currentView === 'orderComplete' && currentOrder && (
         <div style={{ padding: '40px 20px', textAlign: 'center', backgroundColor: '#fff', minHeight: '100vh' }}>
-          <img src="https://cdn-icons-png.flaticon.com/512/3237/3237472.png" style={{width:'80px', marginBottom:'20px'}} alt="cute baby" />
+          {/* 🌟 5. 엑스박스 아이콘 수정: 깨지는 이미지 대신 깔끔한 내장 아이콘 사용 🌟 */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+            <CheckCircle size={60} color={THEME.primary} />
+          </div>
           <h2 style={{ fontSize: '24px', marginBottom: '15px', fontWeight:'bold' }}>주문이 완료되었습니다!</h2>
           <p style={{ color: THEME.subText, fontSize: '15px', marginBottom: '40px', lineHeight: '1.6' }}>정성껏 준비하여 빠르게 배송해드릴게요.<br/>감사합니다. ♡</p>
 
@@ -709,7 +696,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* 🌟 계좌번호 국민은행 적용 🌟 */}
           <div style={{ backgroundColor: '#F9F9F9', padding: '20px', borderRadius: '12px', marginBottom: '30px' }}>
             <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 8px 0' }}>입금 계좌번호</p>
             <p style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 5px 0', color: THEME.text }}>국민은행 453202-04-062095</p>
@@ -737,7 +723,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 5. 비회원 주문조회 --- */}
       {currentView === 'lookup' && (
         <div style={{ padding: '20px', backgroundColor: '#fff', minHeight: '100vh' }}>
           <h2 style={{ fontSize: '20px', marginBottom: '20px', fontWeight: 'bold' }}>주문 내역 조회</h2>
@@ -815,7 +800,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 6. 마스터 관리자 패널 --- */}
       {currentView === 'adminLogin' && (
         <div style={{ padding: '50px 20px', textAlign: 'center', backgroundColor: '#fff', minHeight: '100vh' }}>
           <Lock size={50} color={THEME.primary} style={{ margin: '0 auto 20px auto' }} />
@@ -951,7 +935,6 @@ export default function App() {
             </div>
           )}
 
-          {/* 🌟 팝업 공지사항 및 메인 배너 관리 🌟 */}
           {adminTab === 'settings' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
@@ -984,11 +967,12 @@ export default function App() {
                 </div>
               </div>
 
+              {/* 🌟 3. 관리자 탭 브랜드 추가 칸 너비 깨짐 수정 🌟 */}
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
                 <h3 style={{ fontSize: '18px', marginBottom: '20px', fontWeight: 'bold', color: THEME.text }}>브랜드 관리</h3>
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-                  <input placeholder="새 브랜드명" value={newBrand} onChange={e => setNewBrand(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}` }} />
-                  <button onClick={addBrand} style={{ padding: '0 20px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold' }}>추가</button>
+                  <input placeholder="새 브랜드명" value={newBrand} onChange={e => setNewBrand(e.target.value)} style={{ flex: 1, minWidth: 0, padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}` }} />
+                  <button onClick={addBrand} style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 20px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold' }}>추가</button>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   {brands.map(b => (
@@ -999,12 +983,13 @@ export default function App() {
                 </div>
               </div>
 
+              {/* 🌟 4. 관리자 탭 카테고리 추가 칸 너비 깨짐 수정 🌟 */}
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
                 <h3 style={{ fontSize: '18px', marginBottom: '20px', fontWeight: 'bold', color: THEME.text }}>분류(대/중) 관리</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input placeholder="대분류 (예: 아우터)" value={catLarge} onChange={e => setCatLarge(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, fontSize: '14px' }} />
-                    <input placeholder="중분류 (예: 코트)" value={catMedium} onChange={e => setCatMedium(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, fontSize: '14px' }} />
+                  <div style={{ display: 'flex', gap: '8px', flexDirection: 'row' }}>
+                    <input placeholder="대분류 (예: 아우터)" value={catLarge} onChange={e => setCatLarge(e.target.value)} style={{ flex: 1, minWidth: 0, padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, fontSize: '14px' }} />
+                    <input placeholder="중분류 (예: 코트)" value={catMedium} onChange={e => setCatMedium(e.target.value)} style={{ flex: 1, minWidth: 0, padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, fontSize: '14px' }} />
                   </div>
                   <button onClick={addCategory} style={{ padding: '12px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold' }}>카테고리 추가</button>
                 </div>
@@ -1021,7 +1006,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 하단 네비게이션 탭바 --- */}
       {currentView !== 'detail' && currentView !== 'quotationPreview' && currentView !== 'orderComplete' && (
         <div style={{ position: 'fixed', bottom: 0, width: '100%', backgroundColor: '#fff', display: 'flex', borderTop: `1px solid ${THEME.border}`, padding: '10px 0', paddingBottom: 'env(safe-area-inset-bottom, 15px)', zIndex: 100 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'home' ? THEME.primary : THEME.subText, cursor: 'pointer' }} onClick={() => setCurrentView('home')}>
