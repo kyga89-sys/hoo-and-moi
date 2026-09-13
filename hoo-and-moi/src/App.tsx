@@ -76,21 +76,19 @@ export default function App() {
   const [trackingInputs, setTrackingInputs] = useState<Record<string, string>>({});
   const [adminMemoInputs, setAdminMemoInputs] = useState<Record<string, string>>({});
 
-  // ✨ 상품 등록/수정용 상태
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [prodName, setProdName] = useState('');
-  const [prodPrice, setProdPrice] = useState(''); // 소비자가 -> 쇼핑몰 판매가
-  const [prodCostPrice, setProdCostPrice] = useState(''); // 판매가 -> 쇼핑몰 매입원가 (비밀)
+  const [prodPrice, setProdPrice] = useState('');
+  const [prodCostPrice, setProdCostPrice] = useState(''); 
   const [prodDesc, setProdDesc] = useState(''); 
   const [prodSizes, setProdSizes] = useState(''); 
   const [prodColors, setProdColors] = useState(''); 
   const [prodCategory, setProdCategory] = useState(''); 
   const [prodBrand, setProdBrand] = useState('');
   const [prodFiles, setProdFiles] = useState<FileList | null>(null);
-  const [scrapedImageUrl, setScrapedImageUrl] = useState(''); // 외부 이미지 링크
+  const [scrapedImageUrl, setScrapedImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
-  // ✨ 도매 링크 크롤링용 상태
   const [importUrl, setImportUrl] = useState('');
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
 
@@ -173,7 +171,6 @@ export default function App() {
   const addToCart = () => {
     if (selectedProduct.sizes && !selectedSize) return alert("사이즈를 선택해주세요!");
     if (selectedProduct.colors && !selectedColor) return alert("색상을 선택해주세요!");
-    // ✨ 장바구니에 담을 때 원가(cost_price)도 함께 기억해둡니다. (고객에겐 안보임)
     setCart([...cart, { ...selectedProduct, selectedSize, selectedColor, quantity, cartId: Date.now(), cost_price: selectedProduct.cost_price || 0 }]);
     setShowCartModal(true); 
   };
@@ -204,7 +201,7 @@ export default function App() {
           product_name: `${item.name} ${optionText ? `(${optionText})` : ''}`, 
           price: item.price, 
           quantity: item.quantity,
-          cost_price: item.cost_price // DB에 원가 저장!
+          cost_price: item.cost_price
         };
       });
       await supabase.from('order_items').insert(orderItems);
@@ -265,47 +262,62 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  // ✨ 기린컴퍼니 도매 사이트 URL 크롤링 마법! ✨
+  // ✨ 도매 사이트 상품 링크 불러오기 로직 (에러 수정 및 방어코드 추가) ✨
   const handleFetchUrlInfo = async () => {
     if(!importUrl) return alert("도매 사이트 상품 링크를 입력해주세요.");
     setIsFetchingUrl(true);
     try {
-      // 프록시 서버를 통해 외부 사이트의 HTML을 안전하게 긁어옵니다.
-      const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(importUrl)}`;
-      const res = await fetch(proxy);
-      const data = await res.json();
-      const doc = new DOMParser().parseFromString(data.contents, "text/html");
+      let htmlContent = '';
+      
+      // 프록시 1차 시도
+      try {
+        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(importUrl)}`);
+        const data = await res.json();
+        if (data.contents) htmlContent = data.contents;
+      } catch (err) { /* 1차 실패 무시 */ }
 
-      // 1. 상품명 가져오기
-      const titleMeta = doc.querySelector('meta[property="og:title"]')?.getAttribute('content');
+      // 프록시 2차 시도 (1차 실패 시)
+      if (!htmlContent) {
+        try {
+          const res2 = await fetch(`https://corsproxy.io/?${encodeURIComponent(importUrl)}`);
+          htmlContent = await res2.text();
+        } catch (err) { /* 2차 실패 무시 */ }
+      }
+
+      if (!htmlContent) throw new Error("문서 파싱 실패");
+
+      const doc = new DOMParser().parseFromString(htmlContent, "text/html");
+
+      const titleMeta = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || doc.title;
       if(titleMeta) setProdName(titleMeta);
 
-      // 2. 대표 이미지 가져오기 (외부 URL 그대로 저장)
       const imgMeta = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
       if(imgMeta) setScrapedImageUrl(imgMeta);
 
-      // 3. ⭐️ 아주 중요한 가격 분리 로직 ⭐️
-      // 기린컴퍼니(카페24) 구조: 소비자가(custom), 판매가(text)
       const customPriceEl = doc.querySelector('#span_product_price_custom');
-      let retail = 0; // 소비자가
-      if(customPriceEl && customPriceEl.textContent) retail = parseInt(customPriceEl.textContent.replace(/[^0-9]/g, ''));
-
       const normalPriceEl = doc.querySelector('#span_product_price_text');
-      let wholesale = 0; // 판매가(도매가)
-      if(normalPriceEl && normalPriceEl.textContent) wholesale = parseInt(normalPriceEl.textContent.replace(/[^0-9]/g, ''));
+      const metaPrice = doc.querySelector('meta[property="product:price:amount"]')?.getAttribute('content');
 
-      // 소비자가 -> 우리의 판매가 (고객 노출)
+      let retail = 0; 
+      let wholesale = 0; 
+
+      if(customPriceEl && customPriceEl.textContent) retail = parseInt(customPriceEl.textContent.replace(/[^0-9]/g, '')) || 0;
+      if(normalPriceEl && normalPriceEl.textContent) wholesale = parseInt(normalPriceEl.textContent.replace(/[^0-9]/g, '')) || 0;
+      if(!wholesale && metaPrice) wholesale = parseInt(metaPrice.replace(/[^0-9]/g, '')) || 0;
+
       if(retail > 0) {
         setProdPrice(retail.toString());
       } else if(wholesale > 0) {
-        // 만약 소비자가가 안 적힌 상품이면 판매가에 마진을 더해서 추천 (예: 1.6배)
         setProdPrice(Math.floor(wholesale * 1.6).toString()); 
       }
 
-      // 판매가 -> 우리의 매입가 (비밀 원가)
       if(wholesale > 0) setProdCostPrice(wholesale.toString());
 
-      alert("데이터를 성공적으로 불러왔습니다! 가격이 맞게 들어왔는지 한 번 더 확인해주세요.");
+      if(!retail && !wholesale) {
+        alert("이름과 사진을 성공적으로 불러왔습니다!\n\n(도매가/소비자가격은 사이트 보안으로 인해 가져오지 못했으니 직접 적어주세요.)");
+      } else {
+        alert("데이터를 성공적으로 불러왔습니다! 가격이 올바른지 확인해주세요.");
+      }
     } catch(e) {
       alert("데이터를 불러오지 못했습니다. 링크가 정확한지 확인하시거나 직접 입력해주세요.");
     } finally {
@@ -321,7 +333,6 @@ export default function App() {
       let main_image = scrapedImageUrl || undefined; 
       let sub_images = undefined;
 
-      // 직접 사진을 첨부한 경우 (크롤링 이미지보다 우선)
       if (prodFiles && prodFiles.length > 0) {
         const imageUrls = [];
         for (let i = 0; i < prodFiles.length; i++) {
@@ -338,7 +349,7 @@ export default function App() {
       const productData: any = { 
         name: prodName, 
         price: parseInt(prodPrice), 
-        cost_price: parseInt(prodCostPrice) || 0, // 매입원가 저장!
+        cost_price: parseInt(prodCostPrice) || 0,
         category: prodCategory, 
         brand: prodBrand, 
         description: prodDesc, 
@@ -373,15 +384,51 @@ export default function App() {
     if (window.confirm("❗이 상품을 완전히 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); }
   };
 
-  // ✨ 대시보드 통계 계산 로직 ✨
-  const calculateStats = () => {
-    // 결제완료, 배송지연, 발송완료 상태인 '실제 매출' 주문만 골라냅니다.
-    const validOrders = adminOrders.filter(o => ['결제완료', '배송지연', '발송완료'].includes(o.status));
-    
-    let totalSales = 0; // 총매출
-    let totalCost = 0;  // 총 매입원가
-    let totalShipping = validOrders.length * 3500; // 배송비 마진 (간략화)
+  const handleSaveNotice = async (status: boolean) => {
+    setIsNoticeUploading(true);
+    try {
+      let imageUrl = notice?.image_url || null;
+      if (noticeFile) {
+        const fileName = `notice_${Date.now()}.${noticeFile.name.split('.').pop()}`;
+        await supabase.storage.from('products').upload(fileName, noticeFile);
+        const { data } = supabase.storage.from('products').getPublicUrl(fileName);
+        imageUrl = data.publicUrl;
+      }
+      const { error } = await supabase.from('notices').upsert([{ id: 1, content: noticeInput, image_url: imageUrl, is_active: status }]);
+      if (error) throw error;
+      alert(`공지사항이 ${status ? '팝업 활성화' : '팝업 숨김'} 처리되었습니다.`); fetchNoticesAndBanner();
+    } catch (error: any) { alert("공지 저장 실패: " + error.message); }
+    finally { setIsNoticeUploading(false); }
+  };
 
+  const handleSaveMainBanner = async () => {
+    if (!bannerFile) return alert("배너 이미지를 첨부해주세요.");
+    setIsBannerUploading(true);
+    try {
+      const fileName = `banner_${Date.now()}.${bannerFile.name.split('.').pop()}`;
+      await supabase.storage.from('products').upload(fileName, bannerFile);
+      const { data } = supabase.storage.from('products').getPublicUrl(fileName);
+      const { error } = await supabase.from('notices').upsert([{ id: 2, image_url: data.publicUrl, is_active: true }]);
+      if (error) throw error;
+      alert("메인 배너가 성공적으로 적용되었습니다!"); setBannerFile(null); fetchNoticesAndBanner();
+    } catch (error: any) { alert("배너 저장 실패: " + error.message); }
+    finally { setIsBannerUploading(false); }
+  };
+
+  const addCategory = async () => { 
+    const fullName = [catLarge, catMedium].filter(Boolean).join(' > ');
+    if(!fullName) return alert("대분류를 하나 이상 입력해주세요.");
+    await supabase.from('categories').insert([{ name: fullName }]); 
+    setCatLarge(''); setCatMedium(''); fetchCategories(); 
+  };
+  const deleteCategory = async (id: number) => { if (window.confirm("삭제하시겠습니까?")) { await supabase.from('categories').delete().eq('id', id); fetchCategories(); } };
+  const addBrand = async () => { if(newBrand) { await supabase.from('brands').insert([{ name: newBrand }]); setNewBrand(''); fetchBrands(); } };
+  const deleteBrand = async (id: number) => { if (window.confirm("삭제하시겠습니까?")) { await supabase.from('brands').delete().eq('id', id); fetchBrands(); } };
+
+  const calculateStats = () => {
+    const validOrders = adminOrders.filter(o => ['결제완료', '배송지연', '발송완료'].includes(o.status));
+    let totalSales = 0; 
+    let totalCost = 0;  
     validOrders.forEach(order => {
       totalSales += order.total_amount;
       if(order.order_items) {
@@ -390,16 +437,14 @@ export default function App() {
         });
       }
     });
-
-    const netProfit = totalSales - totalCost; // 순수익
-
+    const netProfit = totalSales - totalCost;
     return { totalSales, totalCost, netProfit, orderCount: validOrders.length };
   };
   const stats = calculateStats();
 
   const getCombinedCategories = () => {
     const tree: Record<string, string[]> = JSON.parse(JSON.stringify(BASE_CATEGORIES));
-    categories.forEach(c => {
+    (categories || []).forEach(c => {
       const parts = c.name.split('>');
       const main = parts[0].trim();
       if (!tree[main]) tree[main] = [];
@@ -645,7 +690,7 @@ export default function App() {
       {currentView === 'cart' && (
         <div style={{ padding: '20px', backgroundColor: '#fff', minHeight: '100vh' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>장바구니</h2>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0' }}>장바구니</h2>
             <span style={{ fontSize: '13px', color: THEME.subText, cursor: 'pointer' }} onClick={() => setCart([])}>전체삭제</span>
           </div>
 
@@ -680,7 +725,7 @@ export default function App() {
                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontSize: '15px', color: THEME.text }}><span>총 {cart.length}개 상품</span><span style={{fontSize:'18px', fontWeight:'bold', color: THEME.primary}}>총 {totalItemAmount.toLocaleString()}원</span></div>
               </div>
 
-              <button onClick={() => setCurrentView('orderForm')} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', marginTop: '20px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>주문하기 ➔</button>
+              <button onClick={() => setCurrentView('orderForm')} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', marginTop: '20px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>주문하기</button>
             </div>
           )}
         </div>
@@ -894,7 +939,6 @@ export default function App() {
 
       {currentView === 'admin' && (
         <div style={{ padding: '20px', paddingBottom: '100px' }}>
-          {/* ✨ 관리자 상단 탭 메뉴에 [대시보드] 추가 ✨ */}
           <div style={{ display: 'flex', borderBottom: `2px solid ${THEME.border}`, marginBottom: '20px', overflowX: 'auto', scrollbarWidth: 'none' }}>
             <div onClick={() => setAdminTab('orders')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'orders' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'orders' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>주문 관리</div>
             <div onClick={() => { setAdminTab('productAdd'); resetProductForm(); }} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'productAdd' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'productAdd' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>상품 등록</div>
@@ -903,7 +947,6 @@ export default function App() {
             <div onClick={() => setAdminTab('dashboard')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'dashboard' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'dashboard' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>매출/수익</div>
           </div>
 
-          {/* ✨ 1. 매출/수익 대시보드 탭 ✨ */}
           {adminTab === 'dashboard' && (
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '15px' }}>통계 대시보드 (진행중인 주문)</h3>
@@ -996,7 +1039,6 @@ export default function App() {
           {adminTab === 'productAdd' && (
             <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
               
-              {/* ✨ 2. 기린컴퍼니 도매 사이트 링크 입력창 추가 ✨ */}
               {!editingProductId && (
                 <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
                   <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -1008,7 +1050,7 @@ export default function App() {
                       {isFetchingUrl ? '로딩중..' : '불러오기'}
                     </button>
                   </div>
-                  <p style={{ fontSize: '11px', color: THEME.subText, marginTop: '8px' }}>* 카페24 기반(기린 등) 도매 사이트 링크를 입력하면 이름, 사진, 가격(소비자가/도매가)을 자동 분류하여 가져옵니다.</p>
+                  <p style={{ fontSize: '11px', color: THEME.subText, marginTop: '8px' }}>* 도매 사이트 링크를 입력하면 이름, 사진, 가격을 자동 분류하여 가져옵니다.</p>
                 </div>
               )}
 
@@ -1029,11 +1071,11 @@ export default function App() {
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
                   <select value={prodBrand} onChange={e => setProdBrand(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }}>
                     <option value="" disabled>브랜드 선택</option>
-                    {brands.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                    {(brands || []).map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
                   </select>
                   <select value={prodCategory} onChange={e => setProdCategory(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }}>
                     <option value="" disabled>종류 선택</option>
-                    {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    {(categories || []).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                   </select>
                 </div>
                 <input placeholder="상품명을 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ width: '100%', fontSize: '24px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '15px', marginBottom: '20px', outline: 'none' }} />
@@ -1088,7 +1130,13 @@ export default function App() {
                 <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>🖼️ 메인 배너 이미지 관리</h3>
                 <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈 화면 중앙에 표시되는 배너 이미지를 변경합니다.</p>
                 <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', cursor: 'pointer', marginBottom: '15px', overflow: 'hidden' }}>
-                  {bannerFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{bannerFile.name} 선택됨</span> ) : mainBannerUrl ? ( <img src={mainBannerUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> ) : ( <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>사진 첨부 (선택)</span></> )}
+                  {bannerFile ? ( 
+                    <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{bannerFile.name} 선택됨</span> 
+                  ) : mainBannerUrl ? ( 
+                    <img src={mainBannerUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> 
+                  ) : ( 
+                    <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>사진 첨부 (선택)</span></> 
+                  )}
                   <input type="file" accept="image/*" onChange={(e) => setBannerFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
                 </label>
                 <button onClick={handleSaveMainBanner} disabled={isBannerUploading} style={{ width: '100%', padding: '14px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>{isBannerUploading ? '업로드 중...' : '메인 배너 변경 적용하기'}</button>
@@ -1098,7 +1146,13 @@ export default function App() {
                 <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>📢 고객 공지 팝업 관리</h3>
                 <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈페이지 접속 시 바로 보이는 팝업창 내용입니다.</p>
                 <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', cursor: 'pointer', marginBottom: '15px', overflow: 'hidden' }}>
-                  {noticeFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{noticeFile.name} 선택됨</span> ) : notice?.image_url ? ( <img src={notice.image_url} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> ) : ( <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>팝업 사진 첨부 (선택)</span></> )}
+                  {noticeFile ? ( 
+                    <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{noticeFile.name} 선택됨</span> 
+                  ) : (notice && notice.image_url) ? ( 
+                    <img src={notice.image_url} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> 
+                  ) : ( 
+                    <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>팝업 사진 첨부 (선택)</span></> 
+                  )}
                   <input type="file" accept="image/*" onChange={(e) => setNoticeFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
                 </label>
                 <textarea placeholder="공지할 내용을 작성해주세요." rows={5} value={noticeInput} onChange={e => setNoticeInput(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', marginBottom: '15px' }} />
@@ -1115,7 +1169,7 @@ export default function App() {
                   <button onClick={addBrand} style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 20px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold' }}>추가</button>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {brands.map(b => (
+                  {(brands || []).map(b => (
                     <span key={b.id} style={{ padding: '8px 14px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '20px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       {b.name} <Trash2 size={16} color="#c62828" style={{ cursor: 'pointer' }} onClick={() => deleteBrand(b.id)} />
                     </span>
@@ -1133,7 +1187,7 @@ export default function App() {
                   <button onClick={addCategory} style={{ padding: '12px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold' }}>카테고리 추가</button>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {categories.map(c => (
+                  {(categories || []).map(c => (
                     <span key={c.id} style={{ padding: '8px 14px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '20px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       {c.name} <Trash2 size={16} color="#c62828" style={{ cursor: 'pointer' }} onClick={() => deleteCategory(c.id)} />
                     </span>
