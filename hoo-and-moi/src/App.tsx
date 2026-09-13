@@ -596,7 +596,7 @@ export default function App() {
                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', fontSize: '15px', color: THEME.text }}><span>총 {cart.length}개 상품</span><span style={{fontSize:'18px', fontWeight:'bold', color: THEME.primary}}>총 {totalItemAmount.toLocaleString()}원</span></div>
               </div>
 
-              <button onClick={() => setCurrentView('orderForm')} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', marginTop: '20px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>발주하기 ➔</button>
+              <button onClick={() => setCurrentView('orderForm')} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', marginTop: '20px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>주문하기 ➔</button>
             </div>
           )}
         </div>
