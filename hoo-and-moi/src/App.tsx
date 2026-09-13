@@ -55,6 +55,13 @@ export default function App() {
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [isBannerUploading, setIsBannerUploading] = useState(false);
 
+  // ✨ 홈 화면 문구 상태 ✨
+  const [introMain, setIntroMain] = useState("매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈");
+  const [introSub, setIntroSub] = useState("편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀");
+  const [introMainInput, setIntroMainInput] = useState("");
+  const [introSubInput, setIntroSubInput] = useState("");
+  const [isIntroUploading, setIsIntroUploading] = useState(false);
+
   const [orderName, setOrderName] = useState('');
   const [orderPhone, setOrderPhone] = useState('');
   const [orderAddress, setOrderAddress] = useState('');
@@ -86,11 +93,10 @@ export default function App() {
   const [prodCategory, setProdCategory] = useState(''); 
   const [prodBrand, setProdBrand] = useState('');
   
-  // ✨ 사진 상태 분리 ✨
-  const [prodFiles, setProdFiles] = useState<FileList | null>(null); // 대표 썸네일 파일
-  const [subProdFiles, setSubProdFiles] = useState<FileList | null>(null); // 상세 사진 첨부 파일들
-  const [inputSubImageUrls, setInputSubImageUrls] = useState(''); // 상세 사진 링크들
-  const [existingMainImageUrl, setExistingMainImageUrl] = useState(''); // 수정 시 기존 썸네일 유지
+  const [prodFiles, setProdFiles] = useState<FileList | null>(null); 
+  const [subProdFiles, setSubProdFiles] = useState<FileList | null>(null); 
+  const [inputSubImageUrls, setInputSubImageUrls] = useState(''); 
+  const [existingMainImageUrl, setExistingMainImageUrl] = useState(''); 
   
   const [isUploading, setIsUploading] = useState(false);
 
@@ -129,15 +135,28 @@ export default function App() {
   };
 
   const fetchNoticesAndBanner = async () => {
-    const { data } = await supabase.from('notices').select('*').in('id', [1, 2]);
+    const { data } = await supabase.from('notices').select('*').in('id', [1, 2, 3]);
     if (data) {
       const popup = data.find((d:any) => d.id === 1);
       const banner = data.find((d:any) => d.id === 2);
+      const intro = data.find((d:any) => d.id === 3);
+
       if (popup) {
         setNotice(popup); setNoticeInput(popup.content || '');
         if (popup.is_active) setShowNoticeModal(true); 
       }
       if (banner && banner.image_url) setMainBannerUrl(banner.image_url);
+      
+      if (intro && intro.content) {
+        const parts = intro.content.split('||');
+        setIntroMain(parts[0] || '');
+        setIntroMainInput(parts[0] || '');
+        setIntroSub(parts[1] || '');
+        setIntroSubInput(parts[1] || '');
+      } else {
+        setIntroMainInput("매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈");
+        setIntroSubInput("편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀");
+      }
     }
   };
 
@@ -265,10 +284,11 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  // ✨ 스마트 복붙 파싱 로직 (옵션 색상, 사이즈 유추 포함) ✨
+  // ✨ 스마트 복붙 파싱 로직 (AI급 옵션/사이즈 추출 완벽 구현) ✨
   const handleSmartPaste = () => {
     if(!importText) return alert("화면에서 복사한 글자를 붙여넣어주세요.");
     
+    let textToParse = importText;
     let parsedRetail = 0;
     let parsedWholesale = 0;
     let brandStr = '';
@@ -276,69 +296,67 @@ export default function App() {
     let colorStr = '';
     let sizeStr = '';
 
-    // 1. 가격 추출
-    const retailMatch = importText.match(/소비자가\s*([\d,]+)원?/);
-    if(retailMatch) parsedRetail = parseInt(retailMatch[1].replace(/,/g, ''));
+    // 1. 가격 추출 및 치환
+    const retailMatch = textToParse.match(/소비자가\s*([\d,]+)원?/);
+    if(retailMatch) {
+        parsedRetail = parseInt(retailMatch[1].replace(/,/g, ''));
+        textToParse = textToParse.replace(retailMatch[0], '');
+    }
 
-    const wholesaleMatch = importText.match(/판매가\s*([\d,]+)원?/);
-    if(wholesaleMatch) parsedWholesale = parseInt(wholesaleMatch[1].replace(/,/g, ''));
+    const wholesaleMatch = textToParse.match(/판매가\s*([\d,]+)원?/);
+    if(wholesaleMatch) {
+        parsedWholesale = parseInt(wholesaleMatch[1].replace(/,/g, ''));
+        textToParse = textToParse.replace(wholesaleMatch[0], '');
+    }
 
-    // 2. 브랜드, 상품명, 색상, 사이즈 추출
-    const lines = importText.split('\n').map(l => l.trim()).filter(l => l);
-    
+    // 2. 색상 추출 (예: <소라/브라운> 또는 [소라/브라운] 등)
+    const colorMatch = textToParse.match(/[<\[(]([가-힣a-zA-Z0-9]+(?:\s*\/\s*[가-힣a-zA-Z0-9]+)+)[>\])]/);
+    if(colorMatch) {
+        colorStr = colorMatch[1].split('/').map(s=>s.trim()).join(', ');
+        textToParse = textToParse.replace(colorMatch[0], '');
+    }
+
+    // 3. 사이즈 추출 (예: *1(XS)~3(M)*, 1~3, S~L 등)
+    const sizeMatch = textToParse.match(/\*?([0-9a-zA-Z()가-힣]+(?:\s*~\s*[0-9a-zA-Z()가-힣]+)+)\*?/);
+    if(sizeMatch) {
+        let rawRange = sizeMatch[1].replace(/\s+/g, '').toUpperCase(); 
+        textToParse = textToParse.replace(sizeMatch[0], '');
+        
+        // 자주 쓰이는 아동복 사이즈 유추 로직
+        if (rawRange === '1(XS)~3(M)') sizeStr = '1(XS), 2(S), 3(M)';
+        else if (rawRange === '1(S)~3(L)') sizeStr = '1(S), 2(M), 3(L)';
+        else if (rawRange === '1~3') sizeStr = '1, 2, 3';
+        else if (rawRange === '1~5') sizeStr = '1, 2, 3, 4, 5';
+        else if (rawRange === '3~7') sizeStr = '3, 5, 7';
+        else if (rawRange === '3~9') sizeStr = '3, 5, 7, 9';
+        else if (rawRange === '5~11') sizeStr = '5, 7, 9, 11';
+        else if (rawRange === '5~13') sizeStr = '5, 7, 9, 11, 13';
+        else if (rawRange === 'XS~M') sizeStr = 'XS, S, M';
+        else if (rawRange === 'XS~L') sizeStr = 'XS, S, M, L';
+        else if (rawRange === 'XS~XL') sizeStr = 'XS, S, M, L, XL';
+        else if (rawRange === 'S~L') sizeStr = 'S, M, L';
+        else if (rawRange === 'S~XL') sizeStr = 'S, M, L, XL';
+        else sizeStr = rawRange; // 패턴 매칭 안되면 원본 노출
+    }
+
+    // 4. 브랜드와 상품명 추출 (불필요한 글자 걸러내고 남은 것)
+    const lines = textToParse.split('\n').map(l => l.trim()).filter(l => l);
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
         if(line.includes('상품상세') || line === '추천' || line.includes('할인')) continue;
         
-        // 상품명이 있는 줄 찾기 (KC가 있거나 글자 수가 어느 정도 되는 줄)
         if(line.match(/[A-Za-z]+KC/i) || line.length > 3) {
-            let fullText = line;
-            if (lines[i+1] && !lines[i+1].includes('원') && !lines[i+1].includes('소비자') && lines[i+1].length < 40) {
-               fullText += " " + lines[i+1];
-            }
-
-            // 색상 추출: <소라/브라운> 또는 [소라/브라운] 등
-            const colorMatch = fullText.match(/[<\[(]([^>\])]*\/[^>\])]*)[>\])]/);
-            if (colorMatch) {
-                colorStr = colorMatch[1].split('/').map(s=>s.trim()).join(', ');
-                fullText = fullText.replace(colorMatch[0], ''); // 텍스트에서 제거
-            }
-
-            // 사이즈 추출 및 유추 로직: *1(XS)~3(M)* 또는 1~3 등
-            const sizeMatch = fullText.match(/\*?([a-zA-Z0-9()]+~[a-zA-Z0-9()]+)\*?/);
-            if (sizeMatch) {
-                let rawRange = sizeMatch[1].trim().replace(/\s+/g, '');
-                fullText = fullText.replace(sizeMatch[0], ''); // 텍스트에서 제거
-                
-                // 자주 쓰는 아동복 사이즈 유추 매핑
-                if (rawRange === '1(XS)~3(M)') sizeStr = '1(XS), 2(S), 3(M)';
-                else if (rawRange === '1(S)~3(L)') sizeStr = '1(S), 2(M), 3(L)';
-                else if (rawRange === '1~3') sizeStr = '1, 2, 3';
-                else if (rawRange === '1~5') sizeStr = '1, 2, 3, 4, 5';
-                else if (rawRange === '3~7') sizeStr = '3, 5, 7';
-                else if (rawRange === '3~9') sizeStr = '3, 5, 7, 9';
-                else if (rawRange === '5~11') sizeStr = '5, 7, 9, 11';
-                else if (rawRange === '5~13') sizeStr = '5, 7, 9, 11, 13';
-                else if (rawRange === 'XS~M') sizeStr = 'XS, S, M';
-                else if (rawRange === 'XS~L') sizeStr = 'XS, S, M, L';
-                else if (rawRange === 'XS~XL') sizeStr = 'XS, S, M, L, XL';
-                else if (rawRange === 'S~L') sizeStr = 'S, M, L';
-                else if (rawRange === 'S~XL') sizeStr = 'S, M, L, XL';
-                else sizeStr = rawRange; // 모르는 범위면 그냥 그대로 노출
-            }
-
-            // 남은 텍스트에서 브랜드와 상품명 분리
-            const parts = fullText.split(' ').filter(Boolean);
+            const parts = line.split(' ').filter(Boolean);
             if(parts.length > 0) {
                 let firstWord = parts[0];
                 if(firstWord.toUpperCase().endsWith('KC')) {
-                    brandStr = firstWord.slice(0, -2); // KC 제거
+                    brandStr = firstWord.slice(0, -2);
                     nameStr = parts.slice(1).join(' ').replace(/소비자가/g, '').replace(/판매가/g, '').trim();
                 } else if(firstWord.match(/^[A-Za-z]+$/)) { 
                     brandStr = firstWord;
                     nameStr = parts.slice(1).join(' ').replace(/소비자가/g, '').replace(/판매가/g, '').trim();
                 } else {
-                    nameStr = fullText.replace(/소비자가/g, '').replace(/판매가/g, '').trim();
+                    nameStr = line.replace(/소비자가/g, '').replace(/판매가/g, '').trim();
                 }
             }
             break; 
@@ -352,7 +370,7 @@ export default function App() {
     if(colorStr) setProdColors(colorStr);
     if(sizeStr) setProdSizes(sizeStr);
 
-    alert("✅ 텍스트 자동 분류가 완료되었습니다! 옵션까지 잘 들어왔는지 확인해주세요.");
+    alert("✅ 텍스트 자동 분류 완료! 추출된 옵션을 확인해주세요.");
     setImportText(''); 
   };
 
@@ -366,12 +384,10 @@ export default function App() {
       let main_image = existingMainImageUrl || undefined; 
       let sub_images_array: string[] = [];
 
-      // 기존 서브 이미지 주소가 입력칸에 있다면 배열에 넣기
       if (inputSubImageUrls) {
         sub_images_array.push(...inputSubImageUrls.split(/,|\n/).map(s => s.trim()).filter(Boolean));
       }
 
-      // 1. 대표 썸네일 업로드
       if (prodFiles && prodFiles.length > 0) {
         for (let i = 0; i < prodFiles.length; i++) {
           const file = prodFiles[i];
@@ -380,11 +396,10 @@ export default function App() {
           const { data } = supabase.storage.from('products').getPublicUrl(fileName);
           
           if (i === 0) main_image = data.publicUrl;
-          else sub_images_array.push(data.publicUrl); // 썸네일에 여러장 올리면 나머지는 서브로
+          else sub_images_array.push(data.publicUrl); 
         }
       }
 
-      // 2. 상세 설명 파일 직접 첨부 업로드
       if (subProdFiles && subProdFiles.length > 0) {
         for (let i = 0; i < subProdFiles.length; i++) {
           const file = subProdFiles[i];
@@ -408,7 +423,7 @@ export default function App() {
 
       if (main_image) productData.main_image = main_image; 
       if (sub_images_array.length > 0) productData.sub_images = sub_images_array.join(',');
-      // 만약 수정할 때 서브 이미지를 싹 지웠다면
+      
       if (editingProductId && sub_images_array.length === 0 && inputSubImageUrls === '') {
         productData.sub_images = null;
       }
@@ -464,6 +479,22 @@ export default function App() {
       alert("메인 배너가 성공적으로 적용되었습니다!"); setBannerFile(null); fetchNoticesAndBanner();
     } catch (error: any) { alert("배너 저장 실패: " + error.message); }
     finally { setIsBannerUploading(false); }
+  };
+
+  // ✨ 메인 문구 저장 로직 ✨
+  const handleSaveIntro = async () => {
+    setIsIntroUploading(true);
+    try {
+      const content = `${introMainInput}||${introSubInput}`;
+      const { error } = await supabase.from('notices').upsert([{ id: 3, content: content, is_active: true }]);
+      if(error) throw error;
+      alert("메인 문구가 성공적으로 변경되었습니다!");
+      fetchNoticesAndBanner();
+    } catch(e:any) {
+      alert("문구 저장 실패: " + e.message);
+    } finally {
+      setIsIntroUploading(false);
+    }
   };
 
   const addCategory = async () => { 
@@ -578,9 +609,10 @@ export default function App() {
 
       {currentView === 'home' && (
         <div>
+          {/* ✨ 홈 화면 메인 문구 연동 ✨ */}
           <div style={{ padding: '30px 20px 0 20px', textAlign: 'center' }}>
-            <p className="serif-text" style={{ color: THEME.brown, fontSize: '17px', marginBottom: '20px', lineHeight: '1.5' }}>매일매일 입고 싶은 옷,<br/>고민 없이 후앤모아 🎈</p>
-            <p className="serif-text" style={{ color: THEME.brown, fontSize: '14px', marginBottom: '30px' }}>편안함에 감성을 더한<br/>우리 아이 맞춤 옷장🎀</p>
+            <p className="serif-text" style={{ color: THEME.brown, fontSize: '17px', marginBottom: '20px', lineHeight: '1.5', whiteSpace: 'pre-line' }}>{introMain}</p>
+            <p className="serif-text" style={{ color: THEME.brown, fontSize: '14px', marginBottom: '30px', whiteSpace: 'pre-line' }}>{introSub}</p>
           </div>
 
           <div style={{ padding: '0 20px 20px 20px' }}>
@@ -1106,27 +1138,27 @@ export default function App() {
           {adminTab === 'productAdd' && (
             <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
               
-              {/* ✨ 스마트 텍스트 복붙 (옵션 추출 포함) ✨ */}
+              {/* ✨ 스마트 텍스트 복붙 (옵션/사이즈 AI 해독 추가) ✨ */}
               {!editingProductId && (
                 <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
                   <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Scissors size={16} /> 도매 상품 스마트 붙여넣기
+                    <Scissors size={16} /> 도매 상품 스마트 복붙 (옵션 추출)
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <textarea 
-                      placeholder="도매 사이트 화면의 글자를 쭉 드래그해서 복사한 후 여기에 붙여넣으세요. (상품명, 소비자가, 판매가 등 포함)" 
+                      placeholder="도매 사이트 화면의 글자를 긁어 복사한 후 붙여넣으세요. (이름, 소비자가, 판매가, 색상, 사이즈 포함)" 
                       value={importText} 
                       onChange={e => setImportText(e.target.value)} 
                       style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px' }} 
                     />
                     <button onClick={handleSmartPaste} style={{ width: '100%', padding: '12px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px' }}>
-                      텍스트 자동 분석하기 (옵션 포함)
+                      텍스트 자동 분석하기
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* ✨ 썸네일 첨부 ✨ */}
+              {/* ✨ 썸네일 파일 첨부 (필수) ✨ */}
               <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '250px', backgroundColor: THEME.bg, cursor: 'pointer' }}>
                 <ImagePlus color={THEME.subText} size={50} />
                 <span style={{ marginTop: '20px', fontSize: '15px', color: THEME.subText, fontWeight: 'bold' }}>{editingProductId ? '사진을 다시 올리면 교체됩니다' : '대표 사진(썸네일) 앨범에서 첨부 (필수)'}</span>
@@ -1163,7 +1195,7 @@ export default function App() {
                 <input placeholder="색상 (예: 소라, 브라운)" value={prodColors} onChange={e => setProdColors(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '15px', fontSize: '14px' }} />
                 <input placeholder="사이즈 (예: 1(XS), 2(S), 3(M))" value={prodSizes} onChange={e => setProdSizes(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '25px', fontSize: '14px' }} />
                 
-                {/* ✨ 상세 설명 & 이미지 추가 ✨ */}
+                {/* ✨ 상세 설명 및 이미지 첨부 (개별첨부+링크 혼합) ✨ */}
                 <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>상세 설명 및 이미지 등록</p>
                 <textarea placeholder="간단한 설명을 적어주세요." rows={3} value={prodDesc} onChange={e => setProdDesc(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', lineHeight: '1.6', marginBottom: '10px' }} />
                 <textarea placeholder="여기에 상세 이미지 링크를 붙여넣으세요. (여러 장일 경우 쉼표(,) 또는 엔터로 구분)" value={inputSubImageUrls} onChange={e => setInputSubImageUrls(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '13px', resize: 'none', height: '60px', marginBottom: '10px' }} />
@@ -1205,6 +1237,21 @@ export default function App() {
 
           {adminTab === 'settings' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              
+              {/* ✨ 홈 화면 메인 문구 수정 기능 ✨ */}
+              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
+                <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>📝 홈 화면 메인 문구 변경</h3>
+                <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈 화면 상단에 노출되는 두 줄의 인사말을 변경합니다.</p>
+                
+                <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, marginBottom: '8px' }}>메인 문구 (큰 글씨)</p>
+                <textarea rows={2} value={introMainInput} onChange={e => setIntroMainInput(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', marginBottom: '15px' }} />
+                
+                <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, marginBottom: '8px' }}>서브 문구 (작은 글씨)</p>
+                <textarea rows={2} value={introSubInput} onChange={e => setIntroSubInput(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', marginBottom: '15px' }} />
+                
+                <button onClick={handleSaveIntro} disabled={isIntroUploading} style={{ width: '100%', padding: '14px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>{isIntroUploading ? '저장중...' : '문구 변경 적용하기'}</button>
+              </div>
+
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
                 <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>🖼️ 메인 배너 이미지 관리</h3>
                 <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈 화면 중앙에 표시되는 배너 이미지를 변경합니다.</p>
