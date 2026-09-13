@@ -55,7 +55,6 @@ export default function App() {
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [isBannerUploading, setIsBannerUploading] = useState(false);
 
-  // ✨ 홈 화면 문구 상태 ✨
   const [introMain, setIntroMain] = useState("매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈");
   const [introSub, setIntroSub] = useState("편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀");
   const [introMainInput, setIntroMainInput] = useState("");
@@ -107,6 +106,11 @@ export default function App() {
   const [newBrand, setNewBrand] = useState('');
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  const handleGoHome = () => {
+    window.history.replaceState(null, '', window.location.pathname);
+    setCurrentView('home');
+  };
 
   useEffect(() => {
     fetchProducts();
@@ -162,8 +166,23 @@ export default function App() {
 
   const fetchProducts = async () => {
     const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-    if (data) setProducts(data);
+    if (data) {
+      setProducts(data);
+      const params = new URLSearchParams(window.location.search);
+      const pId = params.get('productId');
+      if (pId) {
+        const targetProduct = data.find((p:any) => p.id.toString() === pId);
+        if (targetProduct) {
+          setSelectedProduct(targetProduct);
+          setSelectedSize(''); 
+          setSelectedColor(''); 
+          setQuantity(1);
+          setCurrentView('detail');
+        }
+      }
+    }
   };
+
   const fetchCategories = async () => {
     const { data } = await supabase.from('categories').select('*').order('id', { ascending: true });
     if (data) setCategories(data);
@@ -188,7 +207,26 @@ export default function App() {
   };
 
   const openProductDetail = (p: any) => {
+    window.history.replaceState(null, '', `${window.location.pathname}?productId=${p.id}`);
     setSelectedProduct(p); setSelectedSize(''); setSelectedColor(''); setQuantity(1); setCurrentView('detail');
+  };
+
+  const handleShareProduct = async () => {
+    const shareUrl = `${window.location.origin}${window.location.pathname}?productId=${selectedProduct.id}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: selectedProduct.name,
+          text: `${selectedProduct.name} - 후앤모아에서 확인해보세요!`,
+          url: shareUrl,
+        });
+      } catch (err) {
+        console.log("공유 취소됨");
+      }
+    } else {
+      navigator.clipboard.writeText(shareUrl);
+      alert("상품 링크가 복사되었습니다! 원하시는 곳에 붙여넣기 하세요.");
+    }
   };
 
   const addToCart = () => {
@@ -284,7 +322,7 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  // ✨ 스마트 복붙 파싱 로직 (AI급 옵션/사이즈 추출 완벽 구현) ✨
+  // ✨ 스마트 복붙 파싱 로직 (아동복 사이즈 초정밀 AI 추출 포함) ✨
   const handleSmartPaste = () => {
     if(!importText) return alert("화면에서 복사한 글자를 붙여넣어주세요.");
     
@@ -296,7 +334,7 @@ export default function App() {
     let colorStr = '';
     let sizeStr = '';
 
-    // 1. 가격 추출 및 치환
+    // 1. 가격 추출
     const retailMatch = textToParse.match(/소비자가\s*([\d,]+)원?/);
     if(retailMatch) {
         parsedRetail = parseInt(retailMatch[1].replace(/,/g, ''));
@@ -309,37 +347,81 @@ export default function App() {
         textToParse = textToParse.replace(wholesaleMatch[0], '');
     }
 
-    // 2. 색상 추출 (예: <소라/브라운> 또는 [소라/브라운] 등)
+    // 2. 색상 추출 (예: <소라/브라운> 등)
     const colorMatch = textToParse.match(/[<\[(]([가-힣a-zA-Z0-9]+(?:\s*\/\s*[가-힣a-zA-Z0-9]+)+)[>\])]/);
     if(colorMatch) {
         colorStr = colorMatch[1].split('/').map(s=>s.trim()).join(', ');
         textToParse = textToParse.replace(colorMatch[0], '');
     }
 
-    // 3. 사이즈 추출 (예: *1(XS)~3(M)*, 1~3, S~L 등)
-    const sizeMatch = textToParse.match(/\*?([0-9a-zA-Z()가-힣]+(?:\s*~\s*[0-9a-zA-Z()가-힣]+)+)\*?/);
+    // 3. ⭐️ 사이즈 정밀 추출 및 자동 생성기 ⭐️
+    const sizeMatch = textToParse.match(/\*?([0-9a-zA-Z()가-힣]+)\s*~\s*([0-9a-zA-Z()가-힣]+)\*?/);
     if(sizeMatch) {
-        let rawRange = sizeMatch[1].replace(/\s+/g, '').toUpperCase(); 
-        textToParse = textToParse.replace(sizeMatch[0], '');
-        
-        // 자주 쓰이는 아동복 사이즈 유추 로직
-        if (rawRange === '1(XS)~3(M)') sizeStr = '1(XS), 2(S), 3(M)';
-        else if (rawRange === '1(S)~3(L)') sizeStr = '1(S), 2(M), 3(L)';
-        else if (rawRange === '1~3') sizeStr = '1, 2, 3';
-        else if (rawRange === '1~5') sizeStr = '1, 2, 3, 4, 5';
-        else if (rawRange === '3~7') sizeStr = '3, 5, 7';
-        else if (rawRange === '3~9') sizeStr = '3, 5, 7, 9';
-        else if (rawRange === '5~11') sizeStr = '5, 7, 9, 11';
-        else if (rawRange === '5~13') sizeStr = '5, 7, 9, 11, 13';
-        else if (rawRange === 'XS~M') sizeStr = 'XS, S, M';
-        else if (rawRange === 'XS~L') sizeStr = 'XS, S, M, L';
-        else if (rawRange === 'XS~XL') sizeStr = 'XS, S, M, L, XL';
-        else if (rawRange === 'S~L') sizeStr = 'S, M, L';
-        else if (rawRange === 'S~XL') sizeStr = 'S, M, L, XL';
-        else sizeStr = rawRange; // 패턴 매칭 안되면 원본 노출
+        let rawRange = sizeMatch[0];
+        let startSize = sizeMatch[1].trim();
+        let endSize = sizeMatch[2].trim();
+        textToParse = textToParse.replace(rawRange, '');
+
+        // 아동복 특화 프리셋 사전
+        const SIZE_PRESETS = [
+          ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
+          ['JS', 'JM', 'JL'],
+          ['1(XS)', '2(S)', '3(M)', '4(L)', '5(XL)', '6(XXL)'],
+          ['XS(3호)', 'S(5호)', 'M(7호)', 'L(9호)', 'XL(11호)', 'XXL(13호)'],
+          ['S(1~3M)', 'M(3~6M)', 'L(6~12M)', 'XL(12~18M)'],
+          ['S(1~3M)', 'M(3~6M)', 'L(9~12M)', 'XL(12~18M)'], 
+          ['S(3~6M)', 'M(6~12M)', 'L(12~18M)', 'XL(18~24M)'],
+          ['3M', '6M', '9M', '12M', '18M', '24M'],
+          ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
+          ['3', '5', '7', '9', '11', '13', '15', '17', '19'],
+          ['50', '60', '70', '80', '90'],
+          ['70', '80', '90', '100', '110', '120'],
+          ['100', '110', '120', '130', '140', '150', '160']
+        ];
+
+        let found = false;
+        for (const preset of SIZE_PRESETS) {
+          const normPreset = preset.map(s => s.replace(/\s+/g, '').toUpperCase());
+          const normStart = startSize.replace(/\s+/g, '').toUpperCase();
+          const normEnd = endSize.replace(/\s+/g, '').toUpperCase();
+          
+          const startIndex = normPreset.indexOf(normStart);
+          const endIndex = normPreset.indexOf(normEnd);
+
+          if (startIndex !== -1 && endIndex !== -1 && startIndex < endIndex) {
+             sizeStr = preset.slice(startIndex, endIndex + 1).join(', ');
+             found = true;
+             break;
+          }
+        }
+
+        // 사전에 없으면 수학적 유추 알고리즘 발동
+        if (!found) {
+           let sNum = parseInt(startSize.replace(/[^0-9]/g, ''));
+           let eNum = parseInt(endSize.replace(/[^0-9]/g, ''));
+           let suffix = startSize.replace(/[0-9]/g, '');
+
+           if (!isNaN(sNum) && !isNaN(eNum) && sNum < eNum && (eNum - sNum) <= 30) {
+              let step = 1;
+              if (sNum >= 50 && eNum >= 60 && (eNum - sNum) % 10 === 0) step = 10;
+              else if (sNum % 2 !== 0 && eNum % 2 !== 0 && sNum >= 3 && sNum <= 15) step = 2; // 홀수 호수
+              else if (suffix.toUpperCase() === 'M') {
+                 if ((eNum - sNum) % 6 === 0) step = 6;
+                 else if ((eNum - sNum) % 3 === 0) step = 3;
+              }
+
+              let gen = [];
+              for(let i = sNum; i <= eNum; i += step) {
+                 gen.push(i.toString() + suffix);
+              }
+              sizeStr = gen.join(', ');
+           } else {
+              sizeStr = `${startSize} ~ ${endSize}`; 
+           }
+        }
     }
 
-    // 4. 브랜드와 상품명 추출 (불필요한 글자 걸러내고 남은 것)
+    // 4. 남은 텍스트에서 브랜드, 상품명 추출
     const lines = textToParse.split('\n').map(l => l.trim()).filter(l => l);
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i];
@@ -481,7 +563,6 @@ export default function App() {
     finally { setIsBannerUploading(false); }
   };
 
-  // ✨ 메인 문구 저장 로직 ✨
   const handleSaveIntro = async () => {
     setIsIntroUploading(true);
     try {
@@ -588,7 +669,7 @@ export default function App() {
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
         <div style={{ width: '80px', display: 'flex', alignItems: 'center' }}>
            {currentView !== 'home' ? (
-             <ChevronLeft size={28} onClick={() => setCurrentView('home')} style={{ cursor: 'pointer', color: THEME.text }}/>
+             <ChevronLeft size={28} onClick={handleGoHome} style={{ cursor: 'pointer', color: THEME.text }}/>
            ) : (
              <div onClick={handleInstallClick} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: THEME.primaryLight, padding: '6px 10px', borderRadius: '15px' }}>
                <Download size={14} color={THEME.primary} />
@@ -597,7 +678,7 @@ export default function App() {
            )}
         </div>
         
-        <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '26px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer', flex: 1 }} onClick={() => setCurrentView('home')}>Hoo & Moi</h1>
+        <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '26px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer', flex: 1 }} onClick={handleGoHome}>Hoo & Moi</h1>
         
         <div style={{ position: 'relative', cursor: 'pointer', width: '80px', display: 'flex', justifyContent: 'flex-end' }} onClick={() => setCurrentView('cart')}>
           <div style={{ position: 'relative' }}>
@@ -609,7 +690,6 @@ export default function App() {
 
       {currentView === 'home' && (
         <div>
-          {/* ✨ 홈 화면 메인 문구 연동 ✨ */}
           <div style={{ padding: '30px 20px 0 20px', textAlign: 'center' }}>
             <p className="serif-text" style={{ color: THEME.brown, fontSize: '17px', marginBottom: '20px', lineHeight: '1.5', whiteSpace: 'pre-line' }}>{introMain}</p>
             <p className="serif-text" style={{ color: THEME.brown, fontSize: '14px', marginBottom: '30px', whiteSpace: 'pre-line' }}>{introSub}</p>
@@ -670,16 +750,16 @@ export default function App() {
           <div style={{ backgroundColor: '#fff', borderRadius: '15px', padding: '10px', marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}>
             <h3 style={{ fontSize: '15px', color: THEME.primary, padding: '10px', borderBottom: `1px solid ${THEME.border}`, fontWeight: 'bold' }}>브랜드관</h3>
             <div style={{ display: 'flex', flexWrap: 'wrap', padding: '10px 5px' }}>
-              <div onClick={() => { setActiveBrand('전체'); setCurrentView('home'); }} style={{ width: '50%', padding: '12px 10px', fontSize: '15px', cursor: 'pointer', fontWeight: activeBrand === '전체' ? 'bold' : 'normal', color: activeBrand === '전체' ? THEME.primary : THEME.text }}>전체 브랜드</div>
+              <div onClick={() => { setActiveBrand('전체'); handleGoHome(); }} style={{ width: '50%', padding: '12px 10px', fontSize: '15px', cursor: 'pointer', fontWeight: activeBrand === '전체' ? 'bold' : 'normal', color: activeBrand === '전체' ? THEME.primary : THEME.text }}>전체 브랜드</div>
               {brands.map(b => (
-                <div key={b.id} onClick={() => { setActiveBrand(b.name); setCurrentView('home'); }} style={{ width: '50%', padding: '12px 10px', fontSize: '15px', cursor: 'pointer', fontWeight: activeBrand === b.name ? 'bold' : 'normal', color: activeBrand === b.name ? THEME.primary : THEME.text }}>{b.name}</div>
+                <div key={b.id} onClick={() => { setActiveBrand(b.name); handleGoHome(); }} style={{ width: '50%', padding: '12px 10px', fontSize: '15px', cursor: 'pointer', fontWeight: activeBrand === b.name ? 'bold' : 'normal', color: activeBrand === b.name ? THEME.primary : THEME.text }}>{b.name}</div>
               ))}
             </div>
           </div>
 
           <div style={{ backgroundColor: '#fff', borderRadius: '15px', padding: '10px', boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}>
             <h3 style={{ fontSize: '15px', color: THEME.primary, padding: '10px', borderBottom: `1px solid ${THEME.border}`, fontWeight: 'bold' }}>아이템별</h3>
-            <div onClick={() => { setActiveLargeCat('전체'); setActiveSmallCat('전체'); setCurrentView('home'); }} style={{ padding: '15px 10px', borderBottom: `1px solid ${THEME.border}`, fontSize: '15px', cursor: 'pointer', fontWeight: 'bold' }}>모든 상품 보기</div>
+            <div onClick={() => { setActiveLargeCat('전체'); setActiveSmallCat('전체'); handleGoHome(); }} style={{ padding: '15px 10px', borderBottom: `1px solid ${THEME.border}`, fontSize: '15px', cursor: 'pointer', fontWeight: 'bold' }}>모든 상품 보기</div>
             {Object.keys(categoryTree).map(mainCat => (
               <div key={mainCat}>
                 <div onClick={() => setExpandedCats({...expandedCats, [mainCat]: !expandedCats[mainCat]})} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 10px', borderBottom: `1px solid ${THEME.border}`, fontSize: '15px', cursor: 'pointer' }}>
@@ -688,9 +768,9 @@ export default function App() {
                 </div>
                 {expandedCats[mainCat] && (
                   <div style={{ padding: '10px 10px 10px 20px', backgroundColor: '#FCFCFC' }}>
-                    <div onClick={() => { setActiveLargeCat(mainCat); setActiveSmallCat('전체'); setCurrentView('home'); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>{mainCat} 전체</div>
+                    <div onClick={() => { setActiveLargeCat(mainCat); setActiveSmallCat('전체'); handleGoHome(); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>{mainCat} 전체</div>
                     {categoryTree[mainCat].map((sub: string) => (
-                      <div key={sub} onClick={() => { setActiveLargeCat(mainCat); setActiveSmallCat(sub); setCurrentView('home'); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>- {sub}</div>
+                      <div key={sub} onClick={() => { setActiveLargeCat(mainCat); setActiveSmallCat(sub); handleGoHome(); }} style={{ padding: '10px 0', fontSize: '14px', color: THEME.subText, cursor: 'pointer' }}>- {sub}</div>
                     ))}
                   </div>
                 )}
@@ -709,7 +789,14 @@ export default function App() {
 
           <div style={{ padding: '24px 20px' }}>
             {isNewProduct(selectedProduct.created_at) && <span style={{ display: 'inline-block', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px' }}>✨ NEW</span>}
-            <h2 style={{ fontSize: '22px', margin: '0 0 12px 0', fontWeight: 'bold', lineHeight: '1.4' }}>{selectedProduct.name}</h2>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <h2 style={{ fontSize: '22px', margin: 0, fontWeight: 'bold', lineHeight: '1.4' }}>{selectedProduct.name}</h2>
+              <button onClick={handleShareProduct} style={{ backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '50%', width: '36px', height: '36px', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0, marginLeft: '10px' }}>
+                <Share size={18} color={THEME.text} />
+              </button>
+            </div>
+
             <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 10px 0' }}>{selectedProduct.sizes}</p>
             <p style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 30px 0' }}>{selectedProduct.price.toLocaleString()}원</p>
 
@@ -774,7 +861,7 @@ export default function App() {
                 <p style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '30px', color: THEME.text }}>장바구니에 상품이 담겼습니다.</p>
                 <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
                   <button onClick={() => { setShowCartModal(false); setCurrentView('cart'); }} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', borderRadius: '30px', fontWeight: 'bold', fontSize: '15px', border: 'none' }}>장바구니로 가기</button>
-                  <button onClick={() => { setShowCartModal(false); setCurrentView('home'); }} style={{ width: '100%', padding: '16px', backgroundColor: '#fff', color: THEME.text, border: `1px solid ${THEME.border}`, borderRadius: '30px', fontWeight: 'bold', fontSize: '15px' }}>계속 쇼핑하기</button>
+                  <button onClick={() => { setShowCartModal(false); handleGoHome(); }} style={{ width: '100%', padding: '16px', backgroundColor: '#fff', color: THEME.text, border: `1px solid ${THEME.border}`, borderRadius: '30px', fontWeight: 'bold', fontSize: '15px' }}>계속 쇼핑하기</button>
                 </div>
               </div>
             </div>
@@ -938,7 +1025,7 @@ export default function App() {
               <div style={{ backgroundColor: '#fff', border:`1px solid ${THEME.border}`, padding: '15px', borderRadius: '50%' }}><FileText size={20} color={THEME.text} /></div>
               <span style={{ fontSize: '13px', color: THEME.text }}>주문내역 보기</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => setCurrentView('home')}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={handleGoHome}>
               <div style={{ backgroundColor: '#fff', border:`1px solid ${THEME.border}`, padding: '15px', borderRadius: '50%' }}><Home size={20} color={THEME.text} /></div>
               <span style={{ fontSize: '13px', color: THEME.text }}>홈으로 가기</span>
             </div>
@@ -1138,7 +1225,7 @@ export default function App() {
           {adminTab === 'productAdd' && (
             <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
               
-              {/* ✨ 스마트 텍스트 복붙 (옵션/사이즈 AI 해독 추가) ✨ */}
+              {/* ✨ 스마트 텍스트 복붙 (옵션 추출 포함) ✨ */}
               {!editingProductId && (
                 <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
                   <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -1146,7 +1233,7 @@ export default function App() {
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <textarea 
-                      placeholder="도매 사이트 화면의 글자를 긁어 복사한 후 붙여넣으세요. (이름, 소비자가, 판매가, 색상, 사이즈 포함)" 
+                      placeholder="도매 사이트 화면의 글자를 쭉 드래그해서 복사한 후 여기에 붙여넣으세요. (이름, 소비자가, 판매가, 색상, 사이즈 포함)" 
                       value={importText} 
                       onChange={e => setImportText(e.target.value)} 
                       style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px' }} 
@@ -1195,7 +1282,7 @@ export default function App() {
                 <input placeholder="색상 (예: 소라, 브라운)" value={prodColors} onChange={e => setProdColors(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '15px', fontSize: '14px' }} />
                 <input placeholder="사이즈 (예: 1(XS), 2(S), 3(M))" value={prodSizes} onChange={e => setProdSizes(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '25px', fontSize: '14px' }} />
                 
-                {/* ✨ 상세 설명 및 이미지 첨부 (개별첨부+링크 혼합) ✨ */}
+                {/* ✨ 상세 설명 & 이미지 추가 ✨ */}
                 <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>상세 설명 및 이미지 등록</p>
                 <textarea placeholder="간단한 설명을 적어주세요." rows={3} value={prodDesc} onChange={e => setProdDesc(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', lineHeight: '1.6', marginBottom: '10px' }} />
                 <textarea placeholder="여기에 상세 이미지 링크를 붙여넣으세요. (여러 장일 경우 쉼표(,) 또는 엔터로 구분)" value={inputSubImageUrls} onChange={e => setInputSubImageUrls(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '13px', resize: 'none', height: '60px', marginBottom: '10px' }} />
@@ -1327,7 +1414,7 @@ export default function App() {
 
       {currentView !== 'detail' && currentView !== 'quotationPreview' && currentView !== 'orderComplete' && (
         <div style={{ position: 'fixed', bottom: 0, width: '100%', backgroundColor: '#fff', display: 'flex', borderTop: `1px solid ${THEME.border}`, paddingTop: '10px', paddingBottom: 'calc(env(safe-area-inset-bottom, 20px) + 15px)', zIndex: 100 }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'home' ? THEME.primary : THEME.subText, cursor: 'pointer' }} onClick={() => setCurrentView('home')}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'home' ? THEME.primary : THEME.subText, cursor: 'pointer' }} onClick={handleGoHome}>
             <Home size={24} /><span style={{ fontSize: '11px', marginTop: '6px', fontWeight: currentView === 'home' ? 'bold' : 'normal' }}>홈</span>
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'category' ? THEME.primary : THEME.subText, cursor: 'pointer' }} onClick={() => setCurrentView('category')}>
