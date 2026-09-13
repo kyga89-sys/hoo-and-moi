@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X } from 'lucide-react';
+import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// 후앤모아 브랜드 컬러
 const THEME = {
   primary: '#F06A7D',
   primaryLight: '#FFF0F2',
@@ -43,8 +42,6 @@ export default function App() {
   const [showCartModal, setShowCartModal] = useState(false);
 
   const [activeBrand, setActiveBrand] = useState('전체');
-
-  // 🌟 카테고리 대분류/중분류 상태 분리 (수정됨) 🌟
   const [activeLargeCat, setActiveLargeCat] = useState('전체');
   const [activeSmallCat, setActiveSmallCat] = useState('전체');
 
@@ -94,12 +91,37 @@ export default function App() {
   const [catMedium, setCatMedium] = useState('');
   const [newBrand, setNewBrand] = useState('');
 
+  // 🌟 PWA 앱 설치 버튼 상태 관리 🌟
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
   useEffect(() => {
     fetchProducts();
     fetchCategories();
     fetchBrands();
     fetchNoticesAndBanner();
+
+    // 🌟 PWA 설치 가능 여부 감지 🌟
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
+
+  // 🌟 앱 설치 버튼 클릭 이벤트 🌟
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      // 아이폰(Safari)이거나 이미 설치된 경우 안내
+      alert("아이폰(Safari)은 하단의 [공유] 버튼(↑)을 누르고 [홈 화면에 추가]를 선택해주세요!\n\n이미 설치되어 있거나 현재 브라우저에서 지원하지 않을 수 있습니다.");
+    }
+  };
 
   const fetchNoticesAndBanner = async () => {
     const { data } = await supabase.from('notices').select('*').in('id', [1, 2]);
@@ -332,11 +354,8 @@ export default function App() {
   };
   const categoryTree = getCombinedCategories();
 
-  // 🌟 검색 및 카테고리 필터링 로직 강화 🌟
   const displayProducts = products.filter(p => {
     const matchBrand = activeBrand === '전체' || p.brand === activeBrand;
-
-    // 카테고리 필터
     let matchCategory = true;
     if (activeLargeCat !== '전체') {
       if (activeSmallCat !== '전체') {
@@ -345,12 +364,9 @@ export default function App() {
         matchCategory = p.category && p.category.startsWith(activeLargeCat);
       }
     }
-
-    // 띄어쓰기 무시 및 대소문자 무시 검색 적용
     const normalize = (str: string) => (str || '').replace(/\s+/g, '').toLowerCase();
     const normalizedQuery = normalize(searchQuery);
     const matchSearch = !normalizedQuery || normalize(p.name).includes(normalizedQuery) || normalize(p.brand).includes(normalizedQuery);
-
     return matchBrand && matchCategory && matchSearch;
   });
 
@@ -380,14 +396,26 @@ export default function App() {
         </div>
       )}
 
+      {/* 🌟 1. 메인 헤더 수정: [앱 다운] 버튼 추가 🌟 */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
-        <div style={{ width: '28px' }}>
-           {currentView !== 'home' && <ChevronLeft size={28} onClick={() => setCurrentView('home')} style={{ cursor: 'pointer', color: THEME.text }}/>}
+        <div style={{ width: '80px', display: 'flex', alignItems: 'center' }}>
+           {currentView !== 'home' ? (
+             <ChevronLeft size={28} onClick={() => setCurrentView('home')} style={{ cursor: 'pointer', color: THEME.text }}/>
+           ) : (
+             <div onClick={handleInstallClick} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: THEME.primaryLight, padding: '6px 10px', borderRadius: '15px' }}>
+               <Download size={14} color={THEME.primary} />
+               <span style={{fontSize: '12px', color: THEME.primary, fontWeight: 'bold', whiteSpace: 'nowrap'}}>앱 다운</span>
+             </div>
+           )}
         </div>
-        <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '26px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer' }} onClick={() => setCurrentView('home')}>Hoo & Moi</h1>
-        <div style={{ position: 'relative', cursor: 'pointer', width: '28px' }} onClick={() => setCurrentView('cart')}>
-          <ShoppingBag size={24} color={THEME.text} />
-          {cart.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', backgroundColor: THEME.primary, color: 'white', borderRadius: '50%', padding: '2px 6px', fontSize: '11px', fontWeight: 'bold' }}>{cart.length}</span>}
+        
+        <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '26px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer', flex: 1 }} onClick={() => setCurrentView('home')}>Hoo & Moi</h1>
+        
+        <div style={{ position: 'relative', cursor: 'pointer', width: '80px', display: 'flex', justifyContent: 'flex-end' }} onClick={() => setCurrentView('cart')}>
+          <div style={{ position: 'relative' }}>
+            <ShoppingBag size={24} color={THEME.text} />
+            {cart.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', backgroundColor: THEME.primary, color: 'white', borderRadius: '50%', padding: '2px 6px', fontSize: '11px', fontWeight: 'bold' }}>{cart.length}</span>}
+          </div>
         </div>
       </header>
 
@@ -412,7 +440,6 @@ export default function App() {
               <Search size={18} color={THEME.subText} style={{ position: 'absolute', left: '15px', top: '14px' }} />
             </div>
 
-            {/* 🌟 1. 카테고리 대/중분류 분리 (수정됨) 🌟 */}
             <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '10px', scrollbarWidth: 'none' }}>
               <button onClick={() => { setActiveLargeCat('전체'); setActiveSmallCat('전체'); }} style={{ padding: '8px 18px', borderRadius: '20px', fontSize: '14px', fontWeight: activeLargeCat === '전체' ? 'bold' : 'normal', border: activeLargeCat === '전체' ? 'none' : `1px solid ${THEME.border}`, backgroundColor: activeLargeCat === '전체' ? THEME.primary : '#fff', color: activeLargeCat === '전체' ? 'white' : THEME.text, whiteSpace: 'nowrap', transition: '0.2s' }}>전체</button>
               {Object.keys(categoryTree).map(main => (
@@ -677,7 +704,6 @@ export default function App() {
 
       {currentView === 'orderComplete' && currentOrder && (
         <div style={{ padding: '40px 20px', textAlign: 'center', backgroundColor: '#fff', minHeight: '100vh' }}>
-          {/* 🌟 5. 엑스박스 아이콘 수정: 깨지는 이미지 대신 깔끔한 내장 아이콘 사용 🌟 */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
             <CheckCircle size={60} color={THEME.primary} />
           </div>
@@ -937,37 +963,30 @@ export default function App() {
 
           {adminTab === 'settings' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
                 <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>🖼️ 메인 배너 이미지 관리</h3>
                 <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈 화면 중앙에 표시되는 배너 이미지를 변경합니다.</p>
-
                 <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', cursor: 'pointer', marginBottom: '15px', overflow: 'hidden' }}>
                   {bannerFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{bannerFile.name} 선택됨</span> ) : mainBannerUrl ? ( <img src={mainBannerUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> ) : ( <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>사진 첨부 (선택)</span></> )}
                   <input type="file" accept="image/*" onChange={(e) => setBannerFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
                 </label>
-
                 <button onClick={handleSaveMainBanner} disabled={isBannerUploading} style={{ width: '100%', padding: '14px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>{isBannerUploading ? '업로드 중...' : '메인 배너 변경 적용하기'}</button>
               </div>
 
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
                 <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>📢 고객 공지 팝업 관리</h3>
                 <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈페이지 접속 시 바로 보이는 팝업창 내용입니다.</p>
-
                 <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', cursor: 'pointer', marginBottom: '15px', overflow: 'hidden' }}>
                   {noticeFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{noticeFile.name} 선택됨</span> ) : notice?.image_url ? ( <img src={notice.image_url} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> ) : ( <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>팝업 사진 첨부 (선택)</span></> )}
                   <input type="file" accept="image/*" onChange={(e) => setNoticeFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
                 </label>
-
                 <textarea placeholder="공지할 내용을 작성해주세요." rows={5} value={noticeInput} onChange={e => setNoticeInput(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', marginBottom: '15px' }} />
-
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button onClick={() => handleSaveNotice(false)} disabled={isNoticeUploading} style={{ flex: 1, padding: '14px', backgroundColor: THEME.bg, color: THEME.text, borderRadius: '10px', fontWeight: 'bold', border: `1px solid ${THEME.border}` }}>팝업 숨기기(OFF)</button>
                   <button onClick={() => handleSaveNotice(true)} disabled={isNoticeUploading} style={{ flex: 1, padding: '14px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>{isNoticeUploading ? '저장중...' : '팝업 띄우기(ON)'}</button>
                 </div>
               </div>
 
-              {/* 🌟 3. 관리자 탭 브랜드 추가 칸 너비 깨짐 수정 🌟 */}
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
                 <h3 style={{ fontSize: '18px', marginBottom: '20px', fontWeight: 'bold', color: THEME.text }}>브랜드 관리</h3>
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
@@ -983,7 +1002,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 🌟 4. 관리자 탭 카테고리 추가 칸 너비 깨짐 수정 🌟 */}
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
                 <h3 style={{ fontSize: '18px', marginBottom: '20px', fontWeight: 'bold', color: THEME.text }}>분류(대/중) 관리</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
