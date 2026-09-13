@@ -1,0 +1,16 @@
+{
+  "name": "후앤모아 (Hoo & Moi)",
+  "short_name": "후앤모아",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF8F5",
+  "theme_color": "#F06A7D",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
