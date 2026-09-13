@@ -91,7 +91,6 @@ export default function App() {
   const [catMedium, setCatMedium] = useState('');
   const [newBrand, setNewBrand] = useState('');
 
-  // 🌟 PWA 앱 설치 버튼 상태 관리 🌟
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   useEffect(() => {
@@ -100,7 +99,6 @@ export default function App() {
     fetchBrands();
     fetchNoticesAndBanner();
 
-    // 🌟 PWA 설치 가능 여부 감지 🌟
     const handleBeforeInstallPrompt = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -109,7 +107,6 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
-  // 🌟 앱 설치 버튼 클릭 이벤트 🌟
   const handleInstallClick = async () => {
     if (deferredPrompt) {
       deferredPrompt.prompt();
@@ -118,7 +115,6 @@ export default function App() {
         setDeferredPrompt(null);
       }
     } else {
-      // 아이폰(Safari)이거나 이미 설치된 경우 안내
       alert("아이폰(Safari)은 하단의 [공유] 버튼(↑)을 누르고 [홈 화면에 추가]를 선택해주세요!\n\n이미 설치되어 있거나 현재 브라우저에서 지원하지 않을 수 있습니다.");
     }
   };
@@ -373,7 +369,8 @@ export default function App() {
   const filteredAdminOrders = adminOrders.filter(o => adminFilter === '전체' ? true : adminFilter === '취소/환불' ? (o.status === '주문취소' || o.status === '환불처리') : o.status === adminFilter);
 
   return (
-    <div style={{ backgroundColor: THEME.bg, minHeight: '100vh', fontFamily: "'Pretendard', 'Noto Sans KR', sans-serif", paddingBottom: '80px', color: THEME.text }}>
+    // ✨ 수정됨: paddingBottom을 110px로 늘려서 메뉴바에 콘텐츠가 가려지지 않게 함
+    <div style={{ backgroundColor: THEME.bg, minHeight: '100vh', fontFamily: "'Pretendard', 'Noto Sans KR', sans-serif", paddingBottom: '110px', color: THEME.text }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&display=swap');
         @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
@@ -396,7 +393,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟 1. 메인 헤더 수정: [앱 다운] 버튼 추가 🌟 */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
         <div style={{ width: '80px', display: 'flex', alignItems: 'center' }}>
            {currentView !== 'home' ? (
@@ -1024,8 +1020,9 @@ export default function App() {
         </div>
       )}
 
+      {/* ✨ 수정됨: 하단 여백(paddingBottom)을 늘려서 아이폰 하단 바와 겹치지 않게 조절 */}
       {currentView !== 'detail' && currentView !== 'quotationPreview' && currentView !== 'orderComplete' && (
-        <div style={{ position: 'fixed', bottom: 0, width: '100%', backgroundColor: '#fff', display: 'flex', borderTop: `1px solid ${THEME.border}`, padding: '10px 0', paddingBottom: 'env(safe-area-inset-bottom, 15px)', zIndex: 100 }}>
+        <div style={{ position: 'fixed', bottom: 0, width: '100%', backgroundColor: '#fff', display: 'flex', borderTop: `1px solid ${THEME.border}`, paddingTop: '10px', paddingBottom: 'calc(env(safe-area-inset-bottom, 20px) + 15px)', zIndex: 100 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'home' ? THEME.primary : THEME.subText, cursor: 'pointer' }} onClick={() => setCurrentView('home')}>
             <Home size={24} /><span style={{ fontSize: '11px', marginTop: '6px', fontWeight: currentView === 'home' ? 'bold' : 'normal' }}>홈</span>
           </div>
