@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Link, TrendingUp } from 'lucide-react';
+import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -86,11 +86,10 @@ export default function App() {
   const [prodCategory, setProdCategory] = useState(''); 
   const [prodBrand, setProdBrand] = useState('');
   const [prodFiles, setProdFiles] = useState<FileList | null>(null);
-  const [scrapedImageUrl, setScrapedImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
-  const [importUrl, setImportUrl] = useState('');
-  const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+  // ✨ 스마트 복붙용 상태
+  const [importText, setImportText] = useState('');
 
   const [catLarge, setCatLarge] = useState('');
   const [catMedium, setCatMedium] = useState('');
@@ -176,7 +175,6 @@ export default function App() {
   };
   const removeFromCart = (cartId: number) => { setCart(cart.filter(item => item.cartId !== cartId)); };
 
-  // ✨ 배송비 로직: 기본 3,500원 고정 ✨
   const totalShippingFee = cart.length > 0 ? 3500 : 0;
   const totalItemAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalOrderAmount = totalItemAmount + totalShippingFee;
@@ -262,95 +260,62 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  // ✨ 기린컴퍼니(카페24) 완벽 맞춤형 크롤링 로직 ✨
-  const handleFetchUrlInfo = async () => {
-    if(!importUrl) return alert("도매 사이트 상품 링크를 입력해주세요.");
-    setIsFetchingUrl(true);
-    try {
-      let htmlContent = '';
-      try {
-        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(importUrl)}`);
-        const data = await res.json();
-        if (data.contents) htmlContent = data.contents;
-      } catch (err) { }
+  // ✨ 완벽 방어: 텍스트 복붙 파싱 로직 ✨
+  const handleSmartPaste = () => {
+    if(!importText) return alert("화면에서 복사한 글자를 붙여넣어주세요.");
+    
+    let parsedRetail = 0;
+    let parsedWholesale = 0;
+    let brandStr = '';
+    let nameStr = '';
 
-      if (!htmlContent) throw new Error("문서 파싱 실패");
+    // 1. 가격 정규식 추출
+    const retailMatch = importText.match(/소비자가\s*([\d,]+)원?/);
+    if(retailMatch) parsedRetail = parseInt(retailMatch[1].replace(/,/g, ''));
 
-      const doc = new DOMParser().parseFromString(htmlContent, "text/html");
+    const wholesaleMatch = importText.match(/판매가\s*([\d,]+)원?/);
+    if(wholesaleMatch) parsedWholesale = parseInt(wholesaleMatch[1].replace(/,/g, ''));
 
-      // 1. 카페24 HTML 맞춤 파싱 (h3 태그에서 브랜드/상품명 분리)
-      const h3 = doc.querySelector('.infoArea h3');
-      if (h3) {
-          const span = h3.querySelector('span.displaynone');
-          if(span) span.remove(); // 불필요한 태그 제거
-          let rawText = h3.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim();
-          
-          const parts = rawText.split(' ').filter(Boolean);
-          if(parts.length > 0) {
-              let brandStr = parts[0];
-              // 브랜드명 뒤에 붙은 KC 제거
-              if(brandStr.toUpperCase().endsWith('KC')) brandStr = brandStr.slice(0, -2);
-              setProdBrand(brandStr);
-              setProdName(parts.slice(1).join(' ').trim());
-          }
-      } else {
-          const titleMeta = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || doc.title;
-          if(titleMeta) setProdName(titleMeta);
-      }
-
-      // 2. 가격 파싱 (소비자가/도매가)
-      const customPriceEl = doc.querySelector('#span_product_price_custom');
-      const normalPriceEl = doc.querySelector('#span_product_price_text');
-      
-      let retail = 0; 
-      let wholesale = 0; 
-
-      if(customPriceEl && customPriceEl.textContent) retail = parseInt(customPriceEl.textContent.replace(/[^0-9]/g, '')) || 0;
-      if(normalPriceEl && normalPriceEl.textContent) wholesale = parseInt(normalPriceEl.textContent.replace(/[^0-9]/g, '')) || 0;
-
-      if(retail > 0) setProdPrice(retail.toString());
-      if(wholesale > 0) setProdCostPrice(wholesale.toString());
-
-      // 3. 대표 이미지 추출
-      const imgEl = doc.querySelector('#zoom_image');
-      let imgSrc = imgEl ? imgEl.getAttribute('src') : null;
-      if(!imgSrc) imgSrc = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
-      
-      if(imgSrc) {
-          if(imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
-          setScrapedImageUrl(imgSrc);
-      }
-
-      // 4. 색상 / 사이즈 옵션 텍스트 추출
-      const optionSelects = doc.querySelectorAll('.xans-product-option select');
-      if (optionSelects.length >= 1) {
-          const colorOpts = Array.from(optionSelects[0].querySelectorAll('option')).map((o: any) => o.value).filter(v => v !== '*' && v !== '**');
-          if(colorOpts.length > 0) setProdColors(colorOpts.join(', '));
-      }
-      if (optionSelects.length >= 2) {
-          const sizeOpts = Array.from(optionSelects[1].querySelectorAll('option')).map((o: any) => o.value).filter(v => v !== '*' && v !== '**');
-          if(sizeOpts.length > 0) setProdSizes(sizeOpts.join(', '));
-      }
-
-      // 결과 알림창 처리
-      if(!retail && !wholesale && !h3) {
-        alert("⚠️ 도매 사이트 로그인(보안)으로 인해 프록시가 차단되었습니다.\n\n이런 경우 링크 자동 불러오기가 안 되므로, 번거로우시더라도 아래 빈칸에 사진과 정보를 직접 입력해 주세요.");
-      } else {
-        alert("✅ 도매 사이트 데이터를 성공적으로 불러왔습니다!\n아래 입력칸에 내용이 잘 들어갔는지 확인 후 [등록하기]를 눌러주세요.");
-      }
-    } catch(e) {
-      alert("데이터를 불러오지 못했습니다. 링크가 정확한지 확인하시거나 직접 입력해주세요.");
-    } finally {
-      setIsFetchingUrl(false);
+    // 2. 브랜드 및 상품명 추출
+    const lines = importText.split('\n').map(l => l.trim()).filter(l => l);
+    
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        if(line.includes('상품상세') || line === '추천' || line.includes('할인')) continue;
+        
+        // 영문+KC 구조이거나 글자 길이가 어느 정도 되는 첫 문장
+        if(line.match(/[A-Za-z]+KC/i) || line.length > 5) {
+            const parts = line.split(' ');
+            if(parts.length > 0) {
+                let firstWord = parts[0];
+                if(firstWord.toUpperCase().endsWith('KC')) {
+                    brandStr = firstWord.slice(0, -2); // KC 제거
+                    // 이름과 그 다음 줄(옵션텍스트 <소라/브라운>) 합치기
+                    let extraName = lines[i+1] && !lines[i+1].includes('원') && !lines[i+1].includes('추천') ? " " + lines[i+1] : '';
+                    nameStr = parts.slice(1).join(' ') + extraName;
+                } else {
+                    nameStr = line;
+                }
+                break;
+            }
+        }
     }
+
+    if(parsedRetail > 0) setProdPrice(parsedRetail.toString());
+    if(parsedWholesale > 0) setProdCostPrice(parsedWholesale.toString());
+    if(brandStr) setProdBrand(brandStr);
+    if(nameStr) setProdName(nameStr.replace(/소비자가/g, '').trim());
+
+    alert("✅ 텍스트 자동 분류가 완료되었습니다! 빈칸을 확인해주세요.");
+    setImportText(''); // 입력창 초기화
   };
 
   const handleSaveProduct = async () => {
     if (!prodName || !prodPrice) return alert("상품명, 판매 가격은 필수입니다!");
-    if (!editingProductId && (!prodFiles || prodFiles.length === 0) && !scrapedImageUrl) return alert("새 상품 등록 시 사진은 필수입니다!");
+    if (!editingProductId && (!prodFiles || prodFiles.length === 0)) return alert("새 상품 등록 시 사진은 필수입니다!");
     setIsUploading(true);
     try {
-      let main_image = scrapedImageUrl || undefined; 
+      let main_image = undefined; 
       let sub_images = undefined;
 
       if (prodFiles && prodFiles.length > 0) {
@@ -395,10 +360,10 @@ export default function App() {
   };
 
   const resetProductForm = () => {
-    setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setScrapedImageUrl(''); setImportUrl('');
+    setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setImportText('');
   };
   const openEditProduct = (p: any) => {
-    setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setScrapedImageUrl(p.main_image || ''); setAdminTab('productAdd');
+    setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setAdminTab('productAdd');
   };
   const deleteProduct = async (id: string) => {
     if (window.confirm("❗이 상품을 완전히 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); }
@@ -445,12 +410,11 @@ export default function App() {
   const addBrand = async () => { if(newBrand) { await supabase.from('brands').insert([{ name: newBrand }]); setNewBrand(''); fetchBrands(); } };
   const deleteBrand = async (id: number) => { if (window.confirm("삭제하시겠습니까?")) { await supabase.from('brands').delete().eq('id', id); fetchBrands(); } };
 
-  // ✨ 디테일한 매출/수익 대시보드 로직 ✨
   const calculateStats = () => {
     const validOrders = adminOrders.filter(o => ['결제완료', '배송지연', '발송완료'].includes(o.status));
-    let totalOrderAmount = 0; // 결제된 전체 금액
-    let totalProductSales = 0; // 순수 상품 판매 금액
-    let totalCost = 0;  // 상품 매입 원가
+    let totalOrderAmount = 0; 
+    let totalProductSales = 0; 
+    let totalCost = 0;  
 
     validOrders.forEach(order => {
       totalOrderAmount += order.total_amount;
@@ -462,7 +426,7 @@ export default function App() {
       }
     });
 
-    const netProfit = totalProductSales - totalCost; // 순수익 (배송비 제외)
+    const netProfit = totalProductSales - totalCost; 
     return { totalOrderAmount, totalProductSales, totalCost, netProfit, orderCount: validOrders.length };
   };
   const stats = calculateStats();
@@ -972,7 +936,6 @@ export default function App() {
             <div onClick={() => setAdminTab('dashboard')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'dashboard' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'dashboard' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>매출/수익</div>
           </div>
 
-          {/* ✨ 3. 디테일한 매출/수익 대시보드 ✨ */}
           {adminTab === 'dashboard' && (
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '15px' }}>통계 대시보드 (진행중인 주문)</h3>
@@ -1069,32 +1032,31 @@ export default function App() {
           {adminTab === 'productAdd' && (
             <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
               
+              {/* ✨ 스마트 복붙 기능 창 ✨ */}
               {!editingProductId && (
                 <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
                   <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Link size={16} /> 도매 사이트 상품 불러오기
+                    <Scissors size={16} /> 도매 상품 스마트 붙여넣기
                   </p>
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <input placeholder="상품 링크 복사 후 붙여넣기" value={importUrl} onChange={e => setImportUrl(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px' }} />
-                    <button onClick={handleFetchUrlInfo} disabled={isFetchingUrl} style={{ padding: '0 15px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px', whiteSpace: 'nowrap' }}>
-                      {isFetchingUrl ? '로딩중..' : '불러오기'}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <textarea 
+                      placeholder="도매 사이트 화면의 글자를 쭉 드래그해서 복사한 후 여기에 붙여넣으세요. (상품명, 소비자가, 판매가 등 포함)" 
+                      value={importText} 
+                      onChange={e => setImportText(e.target.value)} 
+                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px' }} 
+                    />
+                    <button onClick={handleSmartPaste} style={{ width: '100%', padding: '12px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px' }}>
+                      텍스트 자동 분석하기
                     </button>
                   </div>
-                  <p style={{ fontSize: '11px', color: THEME.subText, marginTop: '8px' }}>* 도매 사이트 링크를 입력하면 이름, 사진, 가격을 자동 분류하여 가져옵니다.</p>
                 </div>
               )}
 
               <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '350px', backgroundColor: THEME.bg, cursor: 'pointer' }}>
-                {scrapedImageUrl ? (
-                  <img src={scrapedImageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <>
-                    <ImagePlus color={THEME.subText} size={50} />
-                    <span style={{ marginTop: '20px', fontSize: '15px', color: THEME.subText, fontWeight: 'bold' }}>{editingProductId ? '사진을 다시 올리면 교체됩니다' : '상품 사진 직접 첨부 (선택)'}</span>
-                    {prodFiles && <span style={{ marginTop: '10px', fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{prodFiles.length}장 선택됨</span>}
-                  </>
-                )}
-                <input type="file" accept="image/*" multiple onChange={(e) => { setProdFiles(e.target.files); setScrapedImageUrl(''); }} style={{ display: 'none' }} />
+                <ImagePlus color={THEME.subText} size={50} />
+                <span style={{ marginTop: '20px', fontSize: '15px', color: THEME.subText, fontWeight: 'bold' }}>{editingProductId ? '사진을 다시 올리면 교체됩니다' : '상품 사진 직접 첨부'}</span>
+                {prodFiles && <span style={{ marginTop: '10px', fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{prodFiles.length}장 선택됨</span>}
+                <input type="file" accept="image/*" multiple onChange={(e) => setProdFiles(e.target.files)} style={{ display: 'none' }} />
               </label>
               
               <div style={{ padding: '25px 20px' }}>
