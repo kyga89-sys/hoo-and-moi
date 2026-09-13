@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp } from 'lucide-react';
+import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Link as LinkIcon, TrendingUp } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -88,8 +88,9 @@ export default function App() {
   const [prodFiles, setProdFiles] = useState<FileList | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // ✨ 스마트 복붙용 상태
-  const [importText, setImportText] = useState('');
+  // ✨ 이미지 링크 직접 붙여넣기 상태 추가 ✨
+  const [inputMainImageUrl, setInputMainImageUrl] = useState('');
+  const [inputSubImageUrls, setInputSubImageUrls] = useState('');
 
   const [catLarge, setCatLarge] = useState('');
   const [catMedium, setCatMedium] = useState('');
@@ -260,64 +261,20 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  // ✨ 완벽 방어: 텍스트 복붙 파싱 로직 ✨
-  const handleSmartPaste = () => {
-    if(!importText) return alert("화면에서 복사한 글자를 붙여넣어주세요.");
-    
-    let parsedRetail = 0;
-    let parsedWholesale = 0;
-    let brandStr = '';
-    let nameStr = '';
-
-    // 1. 가격 정규식 추출
-    const retailMatch = importText.match(/소비자가\s*([\d,]+)원?/);
-    if(retailMatch) parsedRetail = parseInt(retailMatch[1].replace(/,/g, ''));
-
-    const wholesaleMatch = importText.match(/판매가\s*([\d,]+)원?/);
-    if(wholesaleMatch) parsedWholesale = parseInt(wholesaleMatch[1].replace(/,/g, ''));
-
-    // 2. 브랜드 및 상품명 추출
-    const lines = importText.split('\n').map(l => l.trim()).filter(l => l);
-    
-    for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
-        if(line.includes('상품상세') || line === '추천' || line.includes('할인')) continue;
-        
-        // 영문+KC 구조이거나 글자 길이가 어느 정도 되는 첫 문장
-        if(line.match(/[A-Za-z]+KC/i) || line.length > 5) {
-            const parts = line.split(' ');
-            if(parts.length > 0) {
-                let firstWord = parts[0];
-                if(firstWord.toUpperCase().endsWith('KC')) {
-                    brandStr = firstWord.slice(0, -2); // KC 제거
-                    // 이름과 그 다음 줄(옵션텍스트 <소라/브라운>) 합치기
-                    let extraName = lines[i+1] && !lines[i+1].includes('원') && !lines[i+1].includes('추천') ? " " + lines[i+1] : '';
-                    nameStr = parts.slice(1).join(' ') + extraName;
-                } else {
-                    nameStr = line;
-                }
-                break;
-            }
-        }
-    }
-
-    if(parsedRetail > 0) setProdPrice(parsedRetail.toString());
-    if(parsedWholesale > 0) setProdCostPrice(parsedWholesale.toString());
-    if(brandStr) setProdBrand(brandStr);
-    if(nameStr) setProdName(nameStr.replace(/소비자가/g, '').trim());
-
-    alert("✅ 텍스트 자동 분류가 완료되었습니다! 빈칸을 확인해주세요.");
-    setImportText(''); // 입력창 초기화
-  };
-
   const handleSaveProduct = async () => {
     if (!prodName || !prodPrice) return alert("상품명, 판매 가격은 필수입니다!");
-    if (!editingProductId && (!prodFiles || prodFiles.length === 0)) return alert("새 상품 등록 시 사진은 필수입니다!");
+    
+    // 대표 이미지 URL 또는 파일 중 하나는 필수로 있어야 함
+    if (!editingProductId && (!prodFiles || prodFiles.length === 0) && !inputMainImageUrl) {
+      return alert("새 상품 등록 시 대표 사진(파일 첨부 또는 URL)은 필수입니다!");
+    }
+
     setIsUploading(true);
     try {
-      let main_image = undefined; 
-      let sub_images = undefined;
+      let main_image = inputMainImageUrl || undefined; 
+      let sub_images = inputSubImageUrls || undefined;
 
+      // 파일 업로드가 있다면 파일을 최우선으로 적용
       if (prodFiles && prodFiles.length > 0) {
         const imageUrls = [];
         for (let i = 0; i < prodFiles.length; i++) {
@@ -328,7 +285,11 @@ export default function App() {
           imageUrls.push(data.publicUrl);
         }
         main_image = imageUrls[0]; 
-        sub_images = imageUrls.slice(1).join(',') || null;
+        // 여러 장 올렸을 경우, 첫 장은 메인, 나머지는 서브 이미지에 합침
+        if (imageUrls.length > 1) {
+          const uploadedSubs = imageUrls.slice(1).join(',');
+          sub_images = sub_images ? `${sub_images},${uploadedSubs}` : uploadedSubs;
+        }
       }
 
       const productData: any = { 
@@ -342,11 +303,9 @@ export default function App() {
         colors: prodColors 
       };
 
-      if (main_image) { 
-        productData.main_image = main_image; 
-        if (sub_images) productData.sub_images = sub_images; 
-      }
-
+      if (main_image) productData.main_image = main_image; 
+      if (sub_images) productData.sub_images = sub_images; 
+      
       if (editingProductId) {
         const { error } = await supabase.from('products').update(productData).eq('id', editingProductId);
         if(error) throw error; alert("✅ 상품 수정 완료!");
@@ -360,10 +319,10 @@ export default function App() {
   };
 
   const resetProductForm = () => {
-    setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setImportText('');
+    setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setInputMainImageUrl(''); setInputSubImageUrls('');
   };
   const openEditProduct = (p: any) => {
-    setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setAdminTab('productAdd');
+    setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setInputMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd');
   };
   const deleteProduct = async (id: string) => {
     if (window.confirm("❗이 상품을 완전히 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); }
@@ -602,14 +561,15 @@ export default function App() {
         </div>
       )}
 
+      {/* ✨ 상세페이지 화면 업데이트 ✨ */}
       {currentView === 'detail' && selectedProduct && (
         <div style={{ paddingBottom: '100px', backgroundColor: '#fff' }}>
-          <div style={{ display: 'flex', overflowX: 'auto', scrollSnapType: 'x mandatory', scrollbarWidth: 'none' }}>
-            <img src={selectedProduct.main_image} style={{ width: '100vw', height: '120vw', objectFit: 'cover', scrollSnapAlign: 'start', flexShrink: 0 }} />
-            {selectedProduct.sub_images && selectedProduct.sub_images.split(',').map((url: string, idx: number) => (
-              <img key={idx} src={url} style={{ width: '100vw', height: '120vw', objectFit: 'cover', scrollSnapAlign: 'start', flexShrink: 0 }} />
-            ))}
+          
+          {/* 1. 최상단: 대표 썸네일 이미지 딱 1장만 노출 */}
+          <div style={{ width: '100%', height: '120vw', overflow: 'hidden' }}>
+            <img src={selectedProduct.main_image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
+
           <div style={{ padding: '24px 20px' }}>
             {isNewProduct(selectedProduct.created_at) && <span style={{ display: 'inline-block', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px' }}>✨ NEW</span>}
             <h2 style={{ fontSize: '22px', margin: '0 0 12px 0', fontWeight: 'bold', lineHeight: '1.4' }}>{selectedProduct.name}</h2>
@@ -650,11 +610,21 @@ export default function App() {
 
             {selectedProduct.description && (
               <div style={{ borderTop: `1px solid ${THEME.border}`, paddingTop: '25px', marginTop: '10px' }}>
-                <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '12px' }}>상품 설명</p>
-                <p style={{ fontSize: '15px', lineHeight: '1.8', color: '#555', whiteSpace: 'pre-line' }}>{selectedProduct.description}</p>
+                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '15px' }}>상품 설명</p>
+                <p style={{ fontSize: '15px', lineHeight: '1.8', color: '#555', whiteSpace: 'pre-line', marginBottom: '30px' }}>{selectedProduct.description}</p>
               </div>
             )}
           </div>
+          
+          {/* ✨ 2. 하단: [상세 이미지 URL]로 넣은 사진들이 쇼핑몰 상세설명란에 쫙 깔리도록 렌더링 ✨ */}
+          {selectedProduct.sub_images && (
+            <div style={{ paddingBottom: '30px' }}>
+              {selectedProduct.sub_images.split(',').map((url: string, idx: number) => (
+                <img key={idx} src={url.trim()} style={{ width: '100%', display: 'block', marginBottom: '0' }} />
+              ))}
+            </div>
+          )}
+
           <div style={{ position: 'fixed', bottom: 0, width: '100%', padding: '15px 20px', backgroundColor: '#fff', borderTop: `1px solid ${THEME.border}`, zIndex: 100 }}>
             <button onClick={addToCart} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>
                <ShoppingBag size={20} /> 담기
@@ -1029,33 +999,40 @@ export default function App() {
             </div>
           )}
 
+          {/* ✨ 스마트폰 전용: 이미지 링크 등록 기능 (UI 대폭 간소화) ✨ */}
           {adminTab === 'productAdd' && (
             <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
               
-              {/* ✨ 스마트 복붙 기능 창 ✨ */}
-              {!editingProductId && (
-                <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
-                  <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Scissors size={16} /> 도매 상품 스마트 붙여넣기
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <textarea 
-                      placeholder="도매 사이트 화면의 글자를 쭉 드래그해서 복사한 후 여기에 붙여넣으세요. (상품명, 소비자가, 판매가 등 포함)" 
-                      value={importText} 
-                      onChange={e => setImportText(e.target.value)} 
-                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px' }} 
+              <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
+                <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <LinkIcon size={16} /> 도매 상품 이미지 링크 붙여넣기
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  <div>
+                    <span style={{ fontSize: '12px', color: THEME.subText, fontWeight: 'bold' }}>1. 대표 이미지(썸네일) URL (선택)</span>
+                    <input 
+                      placeholder="도매 사이트에서 이미지 주소 복사 후 붙여넣기" 
+                      value={inputMainImageUrl} 
+                      onChange={e => setInputMainImageUrl(e.target.value)} 
+                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', marginTop: '5px' }} 
                     />
-                    <button onClick={handleSmartPaste} style={{ width: '100%', padding: '12px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px' }}>
-                      텍스트 자동 분석하기
-                    </button>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '12px', color: THEME.subText, fontWeight: 'bold' }}>2. 상세설명 이미지 URL (길게 나오는 사진들)</span>
+                    <textarea 
+                      placeholder="상세 사진 링크를 붙여넣으세요. (여러 장일 경우 쉼표(,) 또는 엔터로 구분)" 
+                      value={inputSubImageUrls} 
+                      onChange={e => setInputSubImageUrls(e.target.value)} 
+                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px', marginTop: '5px' }} 
+                    />
                   </div>
                 </div>
-              )}
+              </div>
 
-              <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '350px', backgroundColor: THEME.bg, cursor: 'pointer' }}>
-                <ImagePlus color={THEME.subText} size={50} />
-                <span style={{ marginTop: '20px', fontSize: '15px', color: THEME.subText, fontWeight: 'bold' }}>{editingProductId ? '사진을 다시 올리면 교체됩니다' : '상품 사진 직접 첨부'}</span>
-                {prodFiles && <span style={{ marginTop: '10px', fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{prodFiles.length}장 선택됨</span>}
+              <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '200px', backgroundColor: THEME.bg, cursor: 'pointer' }}>
+                <ImagePlus color={THEME.subText} size={40} />
+                <span style={{ marginTop: '15px', fontSize: '14px', color: THEME.subText, fontWeight: 'bold' }}>앨범에서 사진 직접 첨부 (선택)</span>
+                {prodFiles && <span style={{ marginTop: '10px', fontSize: '13px', color: THEME.primary, fontWeight: 'bold' }}>{prodFiles.length}장 선택됨</span>}
                 <input type="file" accept="image/*" multiple onChange={(e) => setProdFiles(e.target.files)} style={{ display: 'none' }} />
               </label>
               
@@ -1070,7 +1047,7 @@ export default function App() {
                     {(categories || []).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                   </select>
                 </div>
-                <input placeholder="상품명을 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ width: '100%', fontSize: '24px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '15px', marginBottom: '20px', outline: 'none' }} />
+                <input placeholder="상품명을 직접 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ width: '100%', fontSize: '24px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '15px', marginBottom: '20px', outline: 'none' }} />
                 
                 <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
                   <div style={{ flex: 1 }}>
@@ -1086,7 +1063,7 @@ export default function App() {
                 <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>옵션 입력 (선택사항 / 쉼표로 구분)</p>
                 <input placeholder="색상 (예: 핑크, 네이비)" value={prodColors} onChange={e => setProdColors(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '15px', fontSize: '14px' }} />
                 <input placeholder="사이즈 (예: S, M, L)" value={prodSizes} onChange={e => setProdSizes(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '25px', fontSize: '14px' }} />
-                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>상세 설명</p>
+                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>상세 설명글 (선택)</p>
                 <textarea placeholder="설명을 적어주세요." rows={6} value={prodDesc} onChange={e => setProdDesc(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '15px', resize: 'none', lineHeight: '1.6' }} />
               </div>
               <div style={{ padding: '0 20px', display: 'flex', gap: '10px' }}>
