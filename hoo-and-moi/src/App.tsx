@@ -176,8 +176,8 @@ export default function App() {
   };
   const removeFromCart = (cartId: number) => { setCart(cart.filter(item => item.cartId !== cartId)); };
 
-  const uniqueBrands = new Set(cart.map(item => item.brand || '기본'));
-  const totalShippingFee = uniqueBrands.size * 3500;
+  // ✨ 배송비 로직: 기본 3,500원 고정 ✨
+  const totalShippingFee = cart.length > 0 ? 3500 : 0;
   const totalItemAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalOrderAmount = totalItemAmount + totalShippingFee;
 
@@ -262,61 +262,81 @@ export default function App() {
     if (window.confirm("❗주문을 영구히 삭제하시겠습니까?")) { await supabase.from('orders').delete().eq('id', id); fetchAdminOrders(); }
   };
 
-  // ✨ 도매 사이트 상품 링크 불러오기 로직 (에러 수정 및 방어코드 추가) ✨
+  // ✨ 기린컴퍼니(카페24) 완벽 맞춤형 크롤링 로직 ✨
   const handleFetchUrlInfo = async () => {
     if(!importUrl) return alert("도매 사이트 상품 링크를 입력해주세요.");
     setIsFetchingUrl(true);
     try {
       let htmlContent = '';
-      
-      // 프록시 1차 시도
       try {
         const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(importUrl)}`);
         const data = await res.json();
         if (data.contents) htmlContent = data.contents;
-      } catch (err) { /* 1차 실패 무시 */ }
-
-      // 프록시 2차 시도 (1차 실패 시)
-      if (!htmlContent) {
-        try {
-          const res2 = await fetch(`https://corsproxy.io/?${encodeURIComponent(importUrl)}`);
-          htmlContent = await res2.text();
-        } catch (err) { /* 2차 실패 무시 */ }
-      }
+      } catch (err) { }
 
       if (!htmlContent) throw new Error("문서 파싱 실패");
 
       const doc = new DOMParser().parseFromString(htmlContent, "text/html");
 
-      const titleMeta = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || doc.title;
-      if(titleMeta) setProdName(titleMeta);
+      // 1. 카페24 HTML 맞춤 파싱 (h3 태그에서 브랜드/상품명 분리)
+      const h3 = doc.querySelector('.infoArea h3');
+      if (h3) {
+          const span = h3.querySelector('span.displaynone');
+          if(span) span.remove(); // 불필요한 태그 제거
+          let rawText = h3.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim();
+          
+          const parts = rawText.split(' ').filter(Boolean);
+          if(parts.length > 0) {
+              let brandStr = parts[0];
+              // 브랜드명 뒤에 붙은 KC 제거
+              if(brandStr.toUpperCase().endsWith('KC')) brandStr = brandStr.slice(0, -2);
+              setProdBrand(brandStr);
+              setProdName(parts.slice(1).join(' ').trim());
+          }
+      } else {
+          const titleMeta = doc.querySelector('meta[property="og:title"]')?.getAttribute('content') || doc.title;
+          if(titleMeta) setProdName(titleMeta);
+      }
 
-      const imgMeta = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
-      if(imgMeta) setScrapedImageUrl(imgMeta);
-
+      // 2. 가격 파싱 (소비자가/도매가)
       const customPriceEl = doc.querySelector('#span_product_price_custom');
       const normalPriceEl = doc.querySelector('#span_product_price_text');
-      const metaPrice = doc.querySelector('meta[property="product:price:amount"]')?.getAttribute('content');
-
+      
       let retail = 0; 
       let wholesale = 0; 
 
       if(customPriceEl && customPriceEl.textContent) retail = parseInt(customPriceEl.textContent.replace(/[^0-9]/g, '')) || 0;
       if(normalPriceEl && normalPriceEl.textContent) wholesale = parseInt(normalPriceEl.textContent.replace(/[^0-9]/g, '')) || 0;
-      if(!wholesale && metaPrice) wholesale = parseInt(metaPrice.replace(/[^0-9]/g, '')) || 0;
 
-      if(retail > 0) {
-        setProdPrice(retail.toString());
-      } else if(wholesale > 0) {
-        setProdPrice(Math.floor(wholesale * 1.6).toString()); 
-      }
-
+      if(retail > 0) setProdPrice(retail.toString());
       if(wholesale > 0) setProdCostPrice(wholesale.toString());
 
-      if(!retail && !wholesale) {
-        alert("이름과 사진을 성공적으로 불러왔습니다!\n\n(도매가/소비자가격은 사이트 보안으로 인해 가져오지 못했으니 직접 적어주세요.)");
+      // 3. 대표 이미지 추출
+      const imgEl = doc.querySelector('#zoom_image');
+      let imgSrc = imgEl ? imgEl.getAttribute('src') : null;
+      if(!imgSrc) imgSrc = doc.querySelector('meta[property="og:image"]')?.getAttribute('content');
+      
+      if(imgSrc) {
+          if(imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
+          setScrapedImageUrl(imgSrc);
+      }
+
+      // 4. 색상 / 사이즈 옵션 텍스트 추출
+      const optionSelects = doc.querySelectorAll('.xans-product-option select');
+      if (optionSelects.length >= 1) {
+          const colorOpts = Array.from(optionSelects[0].querySelectorAll('option')).map((o: any) => o.value).filter(v => v !== '*' && v !== '**');
+          if(colorOpts.length > 0) setProdColors(colorOpts.join(', '));
+      }
+      if (optionSelects.length >= 2) {
+          const sizeOpts = Array.from(optionSelects[1].querySelectorAll('option')).map((o: any) => o.value).filter(v => v !== '*' && v !== '**');
+          if(sizeOpts.length > 0) setProdSizes(sizeOpts.join(', '));
+      }
+
+      // 결과 알림창 처리
+      if(!retail && !wholesale && !h3) {
+        alert("⚠️ 도매 사이트 로그인(보안)으로 인해 프록시가 차단되었습니다.\n\n이런 경우 링크 자동 불러오기가 안 되므로, 번거로우시더라도 아래 빈칸에 사진과 정보를 직접 입력해 주세요.");
       } else {
-        alert("데이터를 성공적으로 불러왔습니다! 가격이 올바른지 확인해주세요.");
+        alert("✅ 도매 사이트 데이터를 성공적으로 불러왔습니다!\n아래 입력칸에 내용이 잘 들어갔는지 확인 후 [등록하기]를 눌러주세요.");
       }
     } catch(e) {
       alert("데이터를 불러오지 못했습니다. 링크가 정확한지 확인하시거나 직접 입력해주세요.");
@@ -425,20 +445,25 @@ export default function App() {
   const addBrand = async () => { if(newBrand) { await supabase.from('brands').insert([{ name: newBrand }]); setNewBrand(''); fetchBrands(); } };
   const deleteBrand = async (id: number) => { if (window.confirm("삭제하시겠습니까?")) { await supabase.from('brands').delete().eq('id', id); fetchBrands(); } };
 
+  // ✨ 디테일한 매출/수익 대시보드 로직 ✨
   const calculateStats = () => {
     const validOrders = adminOrders.filter(o => ['결제완료', '배송지연', '발송완료'].includes(o.status));
-    let totalSales = 0; 
-    let totalCost = 0;  
+    let totalOrderAmount = 0; // 결제된 전체 금액
+    let totalProductSales = 0; // 순수 상품 판매 금액
+    let totalCost = 0;  // 상품 매입 원가
+
     validOrders.forEach(order => {
-      totalSales += order.total_amount;
+      totalOrderAmount += order.total_amount;
       if(order.order_items) {
         order.order_items.forEach((item: any) => {
+          totalProductSales += item.price * item.quantity;
           totalCost += (item.cost_price || 0) * item.quantity;
         });
       }
     });
-    const netProfit = totalSales - totalCost;
-    return { totalSales, totalCost, netProfit, orderCount: validOrders.length };
+
+    const netProfit = totalProductSales - totalCost; // 순수익 (배송비 제외)
+    return { totalOrderAmount, totalProductSales, totalCost, netProfit, orderCount: validOrders.length };
   };
   const stats = calculateStats();
 
@@ -690,7 +715,7 @@ export default function App() {
       {currentView === 'cart' && (
         <div style={{ padding: '20px', backgroundColor: '#fff', minHeight: '100vh' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0' }}>장바구니</h2>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>장바구니</h2>
             <span style={{ fontSize: '13px', color: THEME.subText, cursor: 'pointer' }} onClick={() => setCart([])}>전체삭제</span>
           </div>
 
@@ -718,7 +743,7 @@ export default function App() {
               ))}
 
               <div style={{ padding: '15px', backgroundColor: THEME.primaryLight, borderRadius: '12px', marginTop: '20px', fontSize: '13px', color: THEME.primary, lineHeight: '1.5' }}>
-                📢 <strong>배송비 안내:</strong><br/> 브랜드 분리배송으로 인해 <span style={{fontWeight:'bold'}}>담긴 브랜드 수({uniqueBrands.size}개)</span>만큼 배송비가 부과됩니다. (브랜드당 3,500원)
+                📢 <strong>기본 배송비 3,500원</strong><br/> <span style={{color: THEME.text}}>* 여러 브랜드 주문 시 합배송 등의 이유로 배송비가 추가될 수 있습니다.</span>
               </div>
 
               <div style={{ marginTop: '30px' }}>
@@ -792,7 +817,7 @@ export default function App() {
 
             <div style={{ marginTop: '20px' }}>
                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '10px' }}><span style={{color:THEME.subText}}>상품 합계</span><span style={{fontWeight:'bold'}}>{totalItemAmount.toLocaleString()}원</span></div>
-               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '20px' }}><span style={{color:THEME.subText}}>배송비</span><span style={{fontWeight:'bold'}}>{totalShippingFee.toLocaleString()}원</span></div>
+               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '20px' }}><span style={{color:THEME.subText}}>기본 배송비</span><span style={{fontWeight:'bold'}}>{totalShippingFee.toLocaleString()}원</span></div>
                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold', color: THEME.primary, padding: '15px 0', borderTop: `1px solid ${THEME.border}`, backgroundColor: THEME.primaryLight, borderRadius: '8px', paddingLeft:'15px', paddingRight:'15px' }}>
                  <span>최종 견적금액</span><span>{totalOrderAmount.toLocaleString()}원</span>
                </div>
@@ -947,27 +972,32 @@ export default function App() {
             <div onClick={() => setAdminTab('dashboard')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'dashboard' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'dashboard' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>매출/수익</div>
           </div>
 
+          {/* ✨ 3. 디테일한 매출/수익 대시보드 ✨ */}
           {adminTab === 'dashboard' && (
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '15px' }}>통계 대시보드 (진행중인 주문)</h3>
               <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>결제완료/배송지연/발송완료 상태의 주문만 합산됩니다.</p>
               
+              <div style={{ backgroundColor: THEME.primary, color: 'white', padding: '25px', borderRadius: '16px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)', marginBottom: '15px' }}>
+                <p style={{ fontSize: '14px', margin: '0 0 10px 0', opacity: 0.9 }}>총 결제금액 (고객 실 입금액)</p>
+                <p style={{ fontSize: '28px', fontWeight: 'bold', margin: 0 }}>{stats.totalOrderAmount.toLocaleString()}원</p>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-                <div style={{ backgroundColor: THEME.primary, color: 'white', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>
-                  <p style={{ fontSize: '13px', margin: '0 0 10px 0', opacity: 0.9 }}>총매출 (판매가 기준)</p>
-                  <p style={{ fontSize: '22px', fontWeight: 'bold', margin: 0 }}>{stats.totalSales.toLocaleString()}원</p>
+                <div style={{ backgroundColor: '#fff', border: `1px solid ${THEME.border}`, padding: '20px', borderRadius: '16px' }}>
+                  <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 10px 0' }}>총 상품매출</p>
+                  <p style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: THEME.text }}>{stats.totalProductSales.toLocaleString()}원</p>
                 </div>
                 <div style={{ backgroundColor: '#fff', border: `1px solid ${THEME.border}`, padding: '20px', borderRadius: '16px' }}>
                   <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 10px 0' }}>총 매입원가</p>
-                  <p style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: THEME.text }}>{stats.totalCost.toLocaleString()}원</p>
+                  <p style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: '#c62828' }}>- {stats.totalCost.toLocaleString()}원</p>
                 </div>
               </div>
 
-              <div style={{ backgroundColor: '#fff', border: `2px solid ${THEME.primary}`, padding: '25px', borderRadius: '16px', textAlign: 'center' }}>
+              <div style={{ backgroundColor: THEME.primaryLight, border: `2px solid ${THEME.primary}`, padding: '25px', borderRadius: '16px', textAlign: 'center' }}>
                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}><TrendingUp color={THEME.primary} size={30} /></div>
-                <p style={{ fontSize: '14px', color: THEME.subText, margin: '0 0 5px 0' }}>순수익 (총매출 - 총원가)</p>
-                <p style={{ fontSize: '28px', fontWeight: 'bold', color: THEME.primary, margin: 0 }}>{stats.netProfit.toLocaleString()}원</p>
-                <p style={{ fontSize: '12px', color: '#ccc', marginTop: '10px' }}>* 실제 통장 입금액과 배송비 마진에 따라 약간의 차이가 있을 수 있습니다.</p>
+                <p style={{ fontSize: '15px', color: THEME.primary, margin: '0 0 5px 0', fontWeight: 'bold' }}>순수익 (상품매출 - 매입원가)</p>
+                <p style={{ fontSize: '32px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{stats.netProfit.toLocaleString()}원</p>
               </div>
             </div>
           )}
