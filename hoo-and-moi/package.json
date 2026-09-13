@@ -46,7 +46,6 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@vitejs/plugin-react": "latest",
-    "@workspace/api-client-react": "workspace:*",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "cmdk": "^1.1.1",
