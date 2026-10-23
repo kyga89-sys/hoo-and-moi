@@ -201,10 +201,21 @@ export default function App() {
         shop_name: shopSettings.shop_name, shop_name_kr: shopSettings.shop_name_kr, admin_password: shopSettings.admin_password, 
         kakao_url: shopSettings.kakao_url, shipping_fee: shopSettings.shipping_fee
       };
-      if (!editBankInfo.id) await supabase.from('store_settings').insert([updateData]);
-      else await supabase.from('store_settings').update(updateData).eq('id', editBankInfo.id);
-      alert("쇼핑몰 설정이 저장되었습니다."); fetchStoreSettings();
-    } catch (err:any) { alert("저장 실패: " + err.message); }
+
+      let response;
+      if (!editBankInfo.id) {
+        response = await supabase.from('store_settings').insert([updateData]);
+      } else {
+        response = await supabase.from('store_settings').update(updateData).eq('id', editBankInfo.id);
+      }
+
+      if (response.error) throw response.error;
+
+      alert("쇼핑몰 설정이 저장되었습니다."); 
+      fetchStoreSettings();
+    } catch (err:any) { 
+      alert("저장 실패 (수파베이스 문제): " + err.message); 
+    }
   };
 
   const fetchNoticesAndBanner = async () => {
@@ -227,16 +238,46 @@ export default function App() {
   };
 
   const fetchProducts = async () => {
-    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-    if (data) {
-      setProducts(data);
-      const pId = new URLSearchParams(window.location.search).get('productId');
+    // 🚨 타입 에러 해결: any[]로 타입 명시
+    let allProducts: any[] = [];
+    let from = 0;
+    const step = 1000;
+    let fetchMore = true;
+
+    while (fetchMore) {
+      const { data } = await supabase
+        .from("products")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .range(from, from + step - 1);
+
+      if (data && data.length > 0) {
+        allProducts = [...allProducts, ...data];
+        from += step;
+        if (data.length < step) {
+          fetchMore = false; 
+        }
+      } else {
+        fetchMore = false;
+      }
+    }
+
+    if (allProducts.length > 0) {
+      setProducts(allProducts);
+      const pId = new URLSearchParams(window.location.search).get("productId");
       if (pId) {
-        const targetProduct = data.find((p:any) => p.id.toString() === pId);
-        if (targetProduct) { setSelectedProduct(targetProduct); setSelectedSize(''); setSelectedColor(''); setQuantity(1); setCurrentView('detail'); }
+        const targetProduct = allProducts.find((p: any) => p.id.toString() === pId);
+        if (targetProduct) {
+          setSelectedProduct(targetProduct);
+          setSelectedSize("");
+          setSelectedColor("");
+          setQuantity(1);
+          setCurrentView("detail");
+        }
       }
     }
   };
+
   const fetchCategories = async () => { const { data } = await supabase.from('categories').select('*').order('id', { ascending: true }); if (data) setCategories(data); };
   const fetchBrands = async () => { const { data } = await supabase.from('brands').select('*').order('id', { ascending: true }); if (data) setBrands(data); };
 
@@ -313,7 +354,9 @@ export default function App() {
               if (sNum >= 50 && eNum >= 60 && (eNum - sNum) % 10 === 0) step = 10;
               else if (sNum % 2 !== 0 && eNum % 2 !== 0 && sNum >= 3 && sNum <= 19) step = 2; 
               else if (suffix.toUpperCase() === 'M') { if ((eNum - sNum) % 6 === 0) step = 6; else if ((eNum - sNum) % 3 === 0) step = 3; }
-              let gen = []; for(let i = sNum; i <= eNum; i += step) { gen.push(i.toString() + suffix); }
+              // 🚨 타입 에러 해결: string[]로 타입 명시
+              let gen: string[] = []; 
+              for(let i = sNum; i <= eNum; i += step) { gen.push(i.toString() + suffix); }
               sizeStr = gen.join(', ');
            } else { sizeStr = `${startSize} ~ ${endSize}`; } 
         }
@@ -448,11 +491,40 @@ export default function App() {
   const openEditProduct = (p: any) => { setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setExistingMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd'); };
   const deleteProduct = async (id: string) => { if (window.confirm("상품을 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); } };
 
+  const getExtraPrice = (optStr: string) => {
+    if (!optStr) return 0;
+    const match = optStr.match(/\(\s*\+([\d,]+)\s*원?\s*\)/);
+    if (match && match[1]) {
+      return parseInt(match[1].replace(/,/g, ""), 10) || 0;
+    }
+    return 0;
+  };
+
   const addToCart = () => {
-    if (selectedProduct.sizes && !selectedSize) return alert("사이즈를 선택해주세요!");
-    if (selectedProduct.colors && !selectedColor) return alert("색상을 선택해주세요!");
-    setCart([...cart, { ...selectedProduct, selectedSize, selectedColor, quantity, cartId: Date.now(), cost_price: selectedProduct.cost_price || 0, brand: selectedProduct.brand }]);
-    setShowCartModal(true); 
+    if (selectedProduct.sizes && !selectedSize)
+      return alert("사이즈를 선택해주세요!");
+    if (selectedProduct.colors && !selectedColor)
+      return alert("색상을 선택해주세요!");
+
+    const sizeExtra = getExtraPrice(selectedSize);
+    const colorExtra = getExtraPrice(selectedColor);
+    const finalPrice = (selectedProduct.price || 0) + sizeExtra + colorExtra;
+
+    setCart([
+      ...cart,
+      {
+        ...selectedProduct,
+        price: finalPrice, 
+        base_price: selectedProduct.price,
+        extra_price: sizeExtra + colorExtra,
+        selectedSize,
+        selectedColor,
+        quantity,
+        cartId: Date.now(),
+        cost_price: selectedProduct.cost_price || 0,
+      },
+    ]);
+    setShowCartModal(true);
   };
   const removeFromCart = (cartId: number) => { setCart(cart.filter(item => item.cartId !== cartId)); };
 
@@ -469,7 +541,6 @@ export default function App() {
         const optionText = [item.selectedColor, item.selectedSize].filter(Boolean).join(' / '); 
         return { 
           order_id: newOrder[0].id, 
-          // 브랜드명이 포함되어 저장되도록 유지
           product_name: `[${item.brand || '자체제작'}] ${item.name} ${optionText ? `(${optionText})` : ''}`, 
           price: item.price, 
           quantity: item.quantity, 
@@ -481,13 +552,6 @@ export default function App() {
     }
   };
 
-  const handleSaveQuotation = async () => {
-    alert("❗입금 완료 후 [주문번호, 주문자 정보, 연락처]를 1:1 채팅으로 보내주셔야 최종 주문이 완료됩니다.");
-    const text = `[${shopSettings.shop_name_kr} 입금확인 요청]\n주문번호: ${currentOrder.order_number}\n주문자: ${currentOrder.customer_name}\n연락처: ${currentOrder.phone}\n입금액: ${currentOrder.total_amount.toLocaleString()}원`;
-    try { await navigator.clipboard.writeText(text); alert("복사되었습니다! 1:1 채팅창에 붙여넣어주세요."); } catch (e) { alert("복사에 실패했습니다."); }
-  };
-
-  // 🔒 주문 조회 보안 강화 (연락처 필수)
   const searchMyOrder = async () => {
     if(!lookupPhone) return alert("보안을 위해 주문 시 입력한 '연락처'를 반드시 입력해주세요.");
     if(!lookupOrderNumber && !lookupName) return alert("연락처와 함께 '주문번호' 또는 '주문자 이름'을 입력해주세요.");
@@ -549,7 +613,6 @@ export default function App() {
     setSelectedProduct(p); setSelectedSize(''); setSelectedColor(''); setQuantity(1); setCurrentView('detail');
   };
 
-  // --- 화면 노출용 상품 데이터 (페이징 적용) ---
   const displayProducts = products.filter(p => {
     const matchBrand = activeBrand === '전체' || p.brand === activeBrand;
     let matchCategory = true;
@@ -578,11 +641,9 @@ export default function App() {
 
   const filteredAdminOrders = adminOrders.filter(o => adminFilter === '전체' ? true : adminFilter === '취소/환불' ? (o.status === '주문취소' || o.status === '환불처리') : o.status === adminFilter);
 
-  // 🏷️ 주문 내역 렌더링 함수 (브랜드 분리/강조 로직)
   const renderOrderItem = (item: any, idx: number) => {
     let brandName = '';
     let itemName = item.product_name;
-    // "[브랜드명] 상품명" 구조에서 브랜드명 추출
     if (itemName.startsWith('[')) {
       const closeIdx = itemName.indexOf(']');
       if (closeIdx !== -1) {
@@ -996,7 +1057,7 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 주문 내역 조회 (보안 강화) --- */}
+      {/* --- 주문 내역 조회 --- */}
       {currentView === 'lookup' && (
         <div style={{ padding: '20px', backgroundColor: '#fff', minHeight: '100vh' }}>
           <h2 style={{ fontSize: '20px', marginBottom: '20px', fontWeight: 'bold' }}>주문 내역 조회</h2>
@@ -1223,6 +1284,28 @@ export default function App() {
           {adminTab === 'productAdd' && (
             <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
 
+              {!editingProductId && (
+                <>
+                  
+                  <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
+                    <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <Scissors size={16} /> 도매 상품 스마트 복붙 (옵션 추출)
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <textarea 
+                        placeholder="도매 사이트 화면의 글자를 쭉 드래그해서 복사한 후 여기에 붙여넣으세요. (이름, 소비자가, 판매가, 색상, 사이즈 포함)" 
+                        value={importText} 
+                        onChange={e => setImportText(e.target.value)} 
+                        style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px' }} 
+                      />
+                      <button onClick={handleSmartPaste} style={{ width: '100%', padding: '12px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px' }}>
+                        텍스트 자동 분석하기
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div style={{ display: 'flex', gap: '15px', padding: '20px', backgroundColor: THEME.bg }}>
                 <label style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '180px', backgroundColor: '#fff', borderRadius: '12px', border: `1px dashed ${THEME.border}`, cursor: 'pointer' }}>
                   <ImagePlus color={THEME.primary} size={36} style={{ marginBottom: '10px' }} />
@@ -1239,25 +1322,6 @@ export default function App() {
                   <input type="file" accept="image/*" multiple onChange={(e) => setSubProdFiles(e.target.files)} style={{ display: 'none' }} />
                 </label>
               </div>
-
-              {!editingProductId && (
-                <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}`, borderTop: `1px solid ${THEME.border}` }}>
-                  <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Scissors size={16} /> 도매 상품 스마트 복붙 (옵션 추출)
-                  </p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <textarea 
-                      placeholder="도매 사이트 화면의 글자를 쭉 드래그해서 복사한 후 여기에 붙여넣으세요. (이름, 소비자가, 판매가, 색상, 사이즈 포함)" 
-                      value={importText} 
-                      onChange={e => setImportText(e.target.value)} 
-                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px' }} 
-                    />
-                    <button onClick={handleSmartPaste} style={{ width: '100%', padding: '12px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px' }}>
-                      텍스트 자동 분석하기
-                    </button>
-                  </div>
-                </div>
-              )}
 
               <div style={{ padding: '25px 20px' }}>
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
