@@ -80,7 +80,7 @@ returns text
 language sql immutable
 as $$
   select case
-    when p_res -> 'body' ->> 'error_code' = 'KOE010' or p_res -> 'body' ->> 'error' = 'invalid_client'
+    when p_res -> 'body' ->> 'error_code' in ('KOE010', 'KOE101') or p_res -> 'body' ->> 'error' = 'invalid_client'
       then 'REST API 키 또는 Client Secret 이 맞지 않습니다. (설정 > 카카오톡 주문 알림에서 확인)'
     when p_res -> 'body' ->> 'error_code' = 'KOE006'
       then 'Redirect URI 가 카카오 앱에 등록된 주소와 다릅니다.'
@@ -293,6 +293,7 @@ begin
   );
 end;
 $$;
+revoke all on function public.kakao_admin_status() from public, anon;
 grant execute on function public.kakao_admin_status() to authenticated;
 
 -- 10) 앱 키 저장 / 알림 켜고 끄기
@@ -318,6 +319,7 @@ begin
   return public.kakao_admin_status();
 end;
 $$;
+revoke all on function public.kakao_admin_save(text, text, boolean) from public, anon;
 grant execute on function public.kakao_admin_save(text, text, boolean) to authenticated;
 
 -- 11) 카카오 로그인 후 돌아온 인증 코드로 연결 (연결되면 확인 메시지 1통 전송)
@@ -363,6 +365,7 @@ begin
   return public.kakao_admin_status();
 end;
 $$;
+revoke all on function public.kakao_admin_connect(text, text) from public, anon;
 grant execute on function public.kakao_admin_connect(text, text) to authenticated;
 
 -- 12) 테스트 메시지 보내기
@@ -379,6 +382,7 @@ begin
   return public.kakao_admin_status();
 end;
 $$;
+revoke all on function public.kakao_admin_test() from public, anon;
 grant execute on function public.kakao_admin_test() to authenticated;
 
 -- 13) 연결 끊기 (토큰만 지움, 앱 키는 남겨둠)
@@ -395,6 +399,7 @@ begin
   return public.kakao_admin_status();
 end;
 $$;
+revoke all on function public.kakao_admin_disconnect() from public, anon;
 grant execute on function public.kakao_admin_disconnect() to authenticated;
 
 
