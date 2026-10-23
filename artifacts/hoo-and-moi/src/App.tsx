@@ -134,6 +134,8 @@ function SortableList<T>({ items, keyOf, onChange, render, maxHeight }: {
 const DEFAULT_COMMUNITY_URL = 'https://open.kakao.com/o/g48GLFNi';
 const DEFAULT_LIST_PRICE_RATE = 30; // 정가 배율 기본값 (도매몰 수집 기본 30%)
 const GRID_STORAGE_KEY = 'hm_grid_cols';
+const ORDERS_SEEN_KEY = 'hm_admin_orders_seen';
+const KAKAO_STATE_KEY = 'hm_kakao_state';
 
 // 클립보드 복사 (구형 브라우저/인앱 브라우저 대비 textarea 방식 fallback)
 const copyText = async (text: string) => {
@@ -278,7 +280,15 @@ export default function App() {
   const [showNewPw, setShowNewPw] = useState(false);
   const [isChangingPw, setIsChangingPw] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
-  const [adminTab, setAdminTab] = useState('orders'); 
+  // 설정 > 카카오톡 주문 알림 (키·토큰은 서버에만 저장, 화면에는 상태만)
+  const [kakaoStatus, setKakaoStatus] = useState<any>(null);
+  const [kakaoStatusError, setKakaoStatusError] = useState('');
+  const [kakaoKeyInput, setKakaoKeyInput] = useState('');
+  const [kakaoSecretInput, setKakaoSecretInput] = useState('');
+  const [kakaoBusy, setKakaoBusy] = useState(false);
+  // 새 주문 표시: 지난번 관리자 화면을 본 시각 이후 들어온 주문
+  const [ordersSeenAt, setOrdersSeenAt] = useState(0);
+  const [adminTab, setAdminTab] = useState('orders');
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
   const [adminFilter, setAdminFilter] = useState('전체'); 
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
@@ -934,6 +944,7 @@ export default function App() {
     const { data: ok } = await supabase.rpc('is_admin');
     if (!ok) { await supabase.auth.signOut(); setIsAdmin(false); return false; }
     setIsAdmin(true);
+    markOrdersSeen(true);
     const { data: u } = await supabase.auth.getUser();
     if (u.user?.email) setAdminEmail(u.user.email);
     await Promise.all([fetchAdminOrders(), fetchProducts(true)]);
@@ -979,6 +990,92 @@ export default function App() {
       alert("비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요.");
     } finally { setIsChangingPw(false); }
   };
+  // 🆕 새 주문 표시: 관리자 화면에 들어올 때 "지난번에 본 시각"을 기억해두고 그 뒤 주문에 NEW 표시
+  //    (fromStorage = 관리자 화면에 처음 들어올 때, 아니면 [주문] 탭을 다시 눌러 확인했을 때)
+  const markOrdersSeen = (fromStorage = false) => {
+    let prev = Date.now();
+    try {
+      if (fromStorage) prev = Number(localStorage.getItem(ORDERS_SEEN_KEY)) || Date.now();
+      localStorage.setItem(ORDERS_SEEN_KEY, String(Date.now()));
+    } catch (e) {}
+    setOrdersSeenAt(prev);
+  };
+  const isNewOrder = (o: any) => ordersSeenAt > 0 && new Date(o.created_at).getTime() > ordersSeenAt;
+  const newOrderCount = adminOrders.filter(isNewOrder).length;
+
+  // 관리자 화면을 열어두면 1분마다 주문 새로고침 (다른 앱 보다 돌아와도 바로 새로고침)
+  useEffect(() => {
+    if (currentView !== 'admin') return;
+    const timer = setInterval(fetchAdminOrders, 60000);
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchAdminOrders(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [currentView]);
+
+  // 💬 카카오톡 주문 알림 (supabase/updates/04_kakao_notify.sql)
+  const kakaoRedirectUri = `${window.location.origin}/`;
+  const kakaoSqlHint = "\n\n(처음이라면 supabase/updates/04_kakao_notify.sql 을 먼저 실행해주세요)";
+  const applyKakaoStatus = (s: any) => { setKakaoStatus(s); setKakaoKeyInput(s?.rest_api_key || ''); setKakaoSecretInput(''); setKakaoStatusError(''); };
+  const fetchKakaoStatus = async () => {
+    const { data, error } = await supabase.rpc('kakao_admin_status');
+    if (error) { setKakaoStatus(null); setKakaoStatusError(/kakao_admin_status|function/i.test(error.message) ? '카카오 알림 SQL(04_kakao_notify.sql)이 아직 실행되지 않았습니다.' : error.message); return; }
+    applyKakaoStatus(data);
+  };
+  const runKakao = async (fn: string, args: Record<string, any> | undefined, okMsg: string) => {
+    setKakaoBusy(true);
+    try {
+      const { data, error } = await supabase.rpc(fn, args);
+      if (error) { alert(error.message + (/function/i.test(error.message) ? kakaoSqlHint : '')); return false; }
+      applyKakaoStatus(data);
+      if (okMsg) alert(okMsg);
+      return true;
+    } finally { setKakaoBusy(false); }
+  };
+  const saveKakaoConfig = (enabled?: boolean) => {
+    const key = kakaoKeyInput.trim();
+    if (!key) return alert("REST API 키를 입력해주세요.");
+    const keyChanged = kakaoStatus?.rest_api_key && kakaoStatus.rest_api_key !== key;
+    if (keyChanged && kakaoStatus?.connected && !window.confirm("REST API 키가 바뀌면 지금 연결은 끊깁니다. 저장 후 [카카오 연결하기]를 다시 눌러주세요.\n계속할까요?")) return;
+    return runKakao('kakao_admin_save', {
+      p_rest_api_key: key,
+      p_client_secret: kakaoSecretInput.trim() ? kakaoSecretInput.trim() : null,
+      p_enabled: enabled ?? (kakaoStatus?.enabled ?? true)
+    }, enabled === undefined ? "저장했습니다." : (enabled ? "주문 알림을 켰습니다." : "주문 알림을 껐습니다. (연결은 유지)"));
+  };
+  const clearKakaoSecret = () => {
+    if (!window.confirm("저장된 Client Secret 을 지울까요? (카카오 앱에서 Client Secret 을 '사용 안 함'으로 바꾼 경우에만)")) return;
+    runKakao('kakao_admin_save', { p_rest_api_key: kakaoStatus?.rest_api_key || kakaoKeyInput.trim(), p_client_secret: '', p_enabled: kakaoStatus?.enabled ?? true }, "Client Secret 을 지웠습니다.");
+  };
+  // 카카오 로그인 화면으로 이동 → 동의 후 이 쇼핑몰 주소로 돌아오면(아래 useEffect) 서버가 연결 마무리
+  const startKakaoConnect = (otherAccount = false) => {
+    if (!kakaoStatus?.rest_api_key) return alert("REST API 키를 먼저 저장해주세요.");
+    if (otherAccount && getInstallEnv().isKakao) return alert("카카오톡 안에서는 다른 계정으로 바꿀 수 없습니다. Chrome·Safari 로 관리자 화면을 열어주세요.");
+    const state = `hm-kakao-${Math.random().toString(36).slice(2, 10)}`;
+    try { sessionStorage.setItem(KAKAO_STATE_KEY, state); } catch (e) {}
+    const q = new URLSearchParams({ client_id: kakaoStatus.rest_api_key, redirect_uri: kakaoRedirectUri, response_type: 'code', scope: 'talk_message', state });
+    if (otherAccount) q.set('prompt', 'login');
+    window.location.href = `https://kauth.kakao.com/oauth/authorize?${q.toString()}`;
+  };
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const state = params.get('state') || '';
+    if (!state.startsWith('hm-kakao-')) return;
+    const code = params.get('code'); const err = params.get('error');
+    window.history.replaceState(null, '', window.location.pathname);
+    let saved = '';
+    try { saved = sessionStorage.getItem(KAKAO_STATE_KEY) || ''; sessionStorage.removeItem(KAKAO_STATE_KEY); } catch (e) {}
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session || !(await enterAdmin())) return alert("카카오 연결을 마치려면 관리자로 로그인한 상태여야 합니다. 로그인 후 다시 [카카오 연결하기]를 눌러주세요.");
+      setAdminTab('settings'); setSettingsOpen(s => ({ ...s, kakao: true }));
+      if (err) { await fetchKakaoStatus(); return alert(err === 'access_denied' ? "카카오 동의를 취소했습니다. 다시 [카카오 연결하기]를 눌러주세요." : `카카오 연결 실패: ${params.get('error_description') || err}`); }
+      if (!code || state !== saved) { await fetchKakaoStatus(); return alert("연결 요청이 만료됐습니다. 다시 [카카오 연결하기]를 눌러주세요."); }
+      const ok = await runKakao('kakao_admin_connect', { p_code: code, p_redirect_uri: kakaoRedirectUri }, "카카오 연결 완료! 카카오톡 '나와의 채팅'에 확인 메시지가 왔는지 봐주세요.");
+      if (!ok) await fetchKakaoStatus();
+    })();
+  }, []);
+  useEffect(() => { if (currentView === 'admin' && adminTab === 'settings' && !kakaoStatus && !kakaoStatusError) fetchKakaoStatus(); }, [currentView, adminTab]);
+
   const handleAdminLogout = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false); setAdminOrders([]);
@@ -1923,8 +2020,11 @@ export default function App() {
             ] as [string, string, any, () => void][]).map(([key, label, Icon, onClick]) => {
               const active = adminTab === key || (key === 'productAdd' && adminTab === 'productAdd');
               return (
-                <button key={key} onClick={onClick} style={{ height: '52px', border: 'none', borderRadius: '10px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', backgroundColor: active ? THEME.primary : 'transparent', color: active ? '#fff' : THEME.subText, fontSize: '11.5px', fontWeight: 'bold' }}>
+                <button key={key} onClick={onClick} style={{ position: 'relative', height: '52px', border: 'none', borderRadius: '10px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', backgroundColor: active ? THEME.primary : 'transparent', color: active ? '#fff' : THEME.subText, fontSize: '11.5px', fontWeight: 'bold' }}>
                   <Icon size={18} />{label}
+                  {key === 'orders' && newOrderCount > 0 && (
+                    <span style={{ position: 'absolute', top: '4px', right: '6px', minWidth: '18px', height: '18px', padding: '0 5px', borderRadius: '9px', backgroundColor: '#e53935', color: '#fff', fontSize: '10.5px', lineHeight: '18px', textAlign: 'center' }}>{newOrderCount}</span>
+                  )}
                 </button>
               );
             })}
@@ -1966,6 +2066,13 @@ export default function App() {
             const nextAction: Record<string, [string, string]> = { '입금대기': ['결제완료', '입금 확인'], '결제완료': ['발송완료', '발송 완료'], '배송지연': ['발송완료', '발송 완료'] };
             return (
               <div>
+                {/* 🆕 지난번 확인 이후 들어온 주문 */}
+                {newOrderCount > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', marginBottom: '10px', borderRadius: '12px', backgroundColor: '#fdecea', border: '1px solid #f5c2c0' }}>
+                    <span style={{ flex: 1, fontSize: '13.5px', fontWeight: 'bold', color: '#c62828' }}>🆕 새 주문 {newOrderCount}건 (NEW 표시)</span>
+                    <button onClick={() => markOrdersSeen()} style={A.smallBtn('outline')}>확인했어요</button>
+                  </div>
+                )}
                 {/* 상태별 건수 = 필터 버튼 */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '6px', marginBottom: '8px' }}>
                   {['입금대기', '결제완료', '배송지연', '발송완료'].map(s => {
@@ -2001,7 +2108,10 @@ export default function App() {
                     <div key={order.id} style={{ ...A.card, padding: 0, overflow: 'hidden', borderLeft: `4px solid ${sStyle.text}` }}>
                       <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: '14.5px', fontWeight: 'bold', margin: '0 0 2px 0' }}>{order.order_number}</p>
+                          <p style={{ fontSize: '14.5px', fontWeight: 'bold', margin: '0 0 2px 0' }}>
+                            {isNewOrder(order) && <span style={{ display: 'inline-block', marginRight: '6px', padding: '1px 6px', borderRadius: '6px', backgroundColor: '#e53935', color: '#fff', fontSize: '10.5px', verticalAlign: '2px' }}>NEW</span>}
+                            {order.order_number}
+                          </p>
                           <p style={{ fontSize: '12px', color: THEME.subText, margin: 0 }}>{new Date(order.created_at).toLocaleString()}</p>
                         </div>
                         <span style={{ flexShrink: 0, padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', backgroundColor: sStyle.bg, color: sStyle.text }}>{order.status}</span>
@@ -2365,6 +2475,90 @@ export default function App() {
                     <p style={{ ...A.help, marginTop: '8px' }}>바꾼 뒤에는 브라우저에 저장된 예전 비밀번호도 새 비밀번호로 바꿔주세요.</p>
                   </div>
                 )}
+              </div>
+
+              {/* 💬 카카오톡 주문 알림: 새 주문 → 관리자 카카오톡 '나와의 채팅'으로 (키·계정 언제든 변경) */}
+              <div style={A.card}>
+                {settingsHeader('kakao', '카카오톡 주문 알림', kakaoStatusError ? '준비 필요 (SQL 실행 전)' : !kakaoStatus ? '새 주문을 내 카카오톡으로 받기' : kakaoStatus.connected ? `현재: 연결됨 · 알림 ${kakaoStatus.enabled ? '켜짐' : '꺼짐'}` : '현재: 연결 안 됨')}
+                {settingsOpen.kakao && (() => {
+                  const s = kakaoStatus;
+                  const fmt = (v?: string) => v ? new Date(v).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+                  const infoRow = (label: string, value: React.ReactNode, color?: string) => (
+                    <div style={{ display: 'flex', gap: '10px', fontSize: '13px', lineHeight: 1.7 }}>
+                      <span style={{ flexShrink: 0, width: '78px', color: THEME.subText }}>{label}</span>
+                      <span style={{ flex: 1, minWidth: 0, color: color || THEME.text, fontWeight: 500, wordBreak: 'break-all' }}>{value}</span>
+                    </div>
+                  );
+                  const copyRow = (label: string, value: string) => (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '4px 0 2px' }}>
+                      <code style={{ flex: 1, minWidth: 0, padding: '7px 10px', borderRadius: '8px', backgroundColor: '#fff', border: `1px solid ${THEME.border}`, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</code>
+                      <button onClick={async () => alert((await copyText(value)) ? `${label} 복사했습니다.` : '복사 실패: 직접 선택해서 복사해주세요.')} style={A.smallBtn('outline')}><Copy size={13} />복사</button>
+                    </div>
+                  );
+                  return (
+                    <div style={{ marginTop: '16px' }}>
+                      {kakaoStatusError ? (
+                        <p style={{ ...A.help, margin: '0 0 12px', color: '#c62828' }}>{kakaoStatusError}<br />Supabase › SQL Editor 에서 supabase/updates/04_kakao_notify.sql 을 실행한 뒤 <button onClick={fetchKakaoStatus} style={{ background: 'none', border: 'none', padding: 0, color: THEME.primary, fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>다시 확인</button></p>
+                      ) : !s ? (
+                        <p style={A.help}>불러오는 중...</p>
+                      ) : (
+                        <>
+                          {/* 1) 지금 상태 */}
+                          <div style={{ padding: '12px 14px', borderRadius: '12px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, marginBottom: '12px' }}>
+                            {infoRow('연결', s.connected ? `✅ 연결됨 (${fmt(s.connected_at)})` : '연결 안 됨', s.connected ? '#2e7d32' : '#c62828')}
+                            {infoRow('알림', s.enabled ? '켜짐 · 새 주문 30초~1분 안에 도착' : '꺼짐')}
+                            {s.connected && infoRow('연결 유지', `매일 자동 갱신 (현재 만료 예정 ${s.refresh_expires_at ? new Date(s.refresh_expires_at).toLocaleDateString('ko-KR') : '-'})`)}
+                            {infoRow('보낸 알림', `${s.sent_count}건 · 마지막 ${fmt(s.last_sent_at)}${s.failed_count ? ` · 실패 ${s.failed_count}건` : ''}`)}
+                            {s.last_error && infoRow('오류', `${s.last_error} (${fmt(s.last_error_at)})`, '#c62828')}
+                          </div>
+
+                          {s.connected ? (
+                            <>
+                              <div style={{ ...A.row2, marginBottom: '8px' }}>
+                                <button onClick={() => runKakao('kakao_admin_test', undefined, "테스트 메시지를 보냈습니다. 카카오톡 '나와의 채팅'을 확인해주세요.")} disabled={kakaoBusy} style={A.btn('primary')}><Send size={15} />테스트 메시지</button>
+                                <button onClick={() => saveKakaoConfig(!s.enabled)} disabled={kakaoBusy} style={A.btn('outline')}>{s.enabled ? '알림 잠시 끄기' : '알림 다시 켜기'}</button>
+                              </div>
+                              <div style={{ ...A.row2, marginBottom: '16px' }}>
+                                <button onClick={() => startKakaoConnect(true)} disabled={kakaoBusy} style={A.btn('outline')}>다른 카카오 계정으로</button>
+                                <button onClick={() => { if (window.confirm("카카오 연결을 끊을까요? 새 주문 알림이 오지 않습니다. (앱 키는 남아 있어 언제든 다시 연결 가능)")) runKakao('kakao_admin_disconnect', undefined, "연결을 끊었습니다."); }} disabled={kakaoBusy} style={A.btn('danger')}>연결 끊기</button>
+                              </div>
+                            </>
+                          ) : (
+                            <button onClick={() => startKakaoConnect(false)} disabled={kakaoBusy || !s.rest_api_key} style={{ ...A.btn('primary'), marginBottom: '6px', backgroundColor: '#FEE500', color: '#191919', opacity: s.rest_api_key ? 1 : 0.4 }}><KakaoIcon size={18} />카카오 연결하기</button>
+                          )}
+                          {!s.connected && <p style={{ ...A.help, margin: '0 0 16px' }}>{s.rest_api_key ? '알림을 받을 카카오 계정으로 로그인 → "카카오톡 메시지 전송" 동의 → 이 화면으로 돌아오면 끝.' : '아래 ② 카카오 앱 정보를 먼저 저장해주세요.'}</p>}
+
+                          {/* 2) 카카오 앱 정보 (언제든 변경 가능) */}
+                          <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 4px', paddingTop: '16px', borderTop: `1px solid ${THEME.border}` }}>② 카카오 앱 정보</p>
+                          <p style={{ ...A.help, margin: '0 0 10px' }}>카카오 디벨로퍼스 › 내 애플리케이션 › 앱 키 에서 복사합니다. 다른 카카오 앱으로 바꿀 때도 여기서 바꾸고 다시 연결하면 됩니다.</p>
+                          <div style={A.field}><label style={A.label}>REST API 키</label><input value={kakaoKeyInput} onChange={e => setKakaoKeyInput(e.target.value)} placeholder="32자리 영문·숫자" autoComplete="off" spellCheck={false} style={A.input} /></div>
+                          <div style={A.field}>
+                            <label style={A.label}>Client Secret <span style={{ fontWeight: 'normal', color: THEME.subText }}>(카카오 앱에서 사용 중일 때만)</span></label>
+                            <input value={kakaoSecretInput} onChange={e => setKakaoSecretInput(e.target.value)} placeholder={s.has_client_secret ? '저장되어 있음 · 바꿀 때만 입력' : '없으면 비워두기'} autoComplete="off" spellCheck={false} style={A.input} />
+                            {s.has_client_secret && <button onClick={clearKakaoSecret} style={{ background: 'none', border: 'none', padding: '6px 0 0', color: '#c62828', fontSize: '12px', cursor: 'pointer' }}>저장된 Client Secret 지우기</button>}
+                          </div>
+                          <button onClick={() => saveKakaoConfig()} disabled={kakaoBusy} style={{ ...A.btn('dark'), marginBottom: '16px' }}>{kakaoBusy ? '처리 중...' : '앱 정보 저장'}</button>
+
+                          {/* 3) 처음 한 번 카카오 앱 만들기 안내 */}
+                          <details style={{ borderTop: `1px solid ${THEME.border}`, paddingTop: '14px' }}>
+                            <summary style={{ fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>처음 설정 방법 (카카오 앱 만들기, 1번만)</summary>
+                            <div style={{ fontSize: '12.5px', color: THEME.text, lineHeight: 1.7, marginTop: '10px', padding: '12px', backgroundColor: THEME.bg, borderRadius: '10px' }}>
+                              <p style={{ margin: '0 0 6px' }}>1. developers.kakao.com 에 카카오 계정으로 로그인 → <strong>내 애플리케이션 › 애플리케이션 추가</strong> (이름 예: 후앤모아 알림)</p>
+                              <p style={{ margin: '0 0 2px' }}>2. <strong>플랫폼 › Web › 사이트 도메인</strong>에 아래 주소 등록</p>
+                              {copyRow('사이트 도메인을', window.location.origin)}
+                              <p style={{ margin: '8px 0 2px' }}>3. <strong>카카오 로그인</strong> 켜기(ON) → <strong>Redirect URI</strong>에 아래 주소 등록</p>
+                              {copyRow('Redirect URI 를', kakaoRedirectUri)}
+                              <p style={{ margin: '8px 0 6px' }}>4. <strong>카카오 로그인 › 동의항목</strong>에서 <strong>카카오톡 메시지 전송</strong>을 "선택 동의"로 설정</p>
+                              <p style={{ margin: '0 0 6px' }}>5. <strong>앱 키</strong>의 REST API 키 (그리고 <strong>보안 › Client Secret</strong> 코드가 "사용함"이면 그 코드도) → 위 ②에 붙여넣고 저장</p>
+                              <p style={{ margin: 0 }}>6. [카카오 연결하기] → 알림 받을 카카오 계정으로 로그인·동의</p>
+                              <p style={{ margin: '8px 0 0', color: THEME.subText }}>※ 알림은 "연결한 카카오 계정"의 나와의 채팅으로 갑니다. 받는 계정을 바꾸려면 [다른 카카오 계정으로]를 누르세요. 무료이며 하루 보낼 수 있는 양도 충분합니다.</p>
+                            </div>
+                          </details>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* ↕️ 홈 화면 배치: 분류 탭 · 브랜드 · 상품 순서 (끌어서 변경 후 저장) */}
