@@ -186,6 +186,8 @@ export default function App() {
   // --- 카테고리/브랜드 관리 상태 ---
   const [newBrand, setNewBrand] = useState('');
   const [brandSearch, setBrandSearch] = useState('');
+  const [orderSearch, setOrderSearch] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState<Record<string, boolean>>({ shop: true });
   const [adminCatExpanded, setAdminCatExpanded] = useState<Record<string, boolean>>({});
   const [newMainCat, setNewMainCat] = useState('');
   const [newSubCats, setNewSubCats] = useState<Record<string, string>>({});
@@ -885,6 +887,41 @@ export default function App() {
     copyText(buildOrderSheet(currentOrder));
     window.open(shopSettings.kakao_url, '_blank');
   };
+  // 🧰 관리자 화면 공통 모양 (카드·입력칸·버튼 크기/간격 통일)
+  const A = {
+    card: { backgroundColor: '#fff', borderRadius: '16px', border: `1px solid ${THEME.border}`, padding: '18px', marginBottom: '14px' } as React.CSSProperties,
+    cardTitle: { fontSize: '16px', fontWeight: 'bold', color: THEME.text, margin: 0 } as React.CSSProperties,
+    help: { fontSize: '12px', color: THEME.subText, margin: '4px 0 0 0', lineHeight: 1.5 } as React.CSSProperties,
+    label: { display: 'block', fontSize: '12.5px', fontWeight: 'bold', color: THEME.text, margin: '0 0 6px 0' } as React.CSSProperties,
+    input: { width: '100%', height: '44px', padding: '0 12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px', color: THEME.text } as React.CSSProperties,
+    textarea: { width: '100%', padding: '10px 12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px', lineHeight: 1.6, resize: 'vertical' as const, color: THEME.text } as React.CSSProperties,
+    row2: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' } as React.CSSProperties,
+    field: { marginBottom: '14px' } as React.CSSProperties,
+    btn: (kind: 'primary' | 'dark' | 'outline' | 'danger' = 'primary', full = true): React.CSSProperties => ({
+      width: full ? '100%' : 'auto', height: '46px', padding: '0 16px', borderRadius: '12px', fontSize: '14.5px', fontWeight: 'bold', cursor: 'pointer',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', whiteSpace: 'nowrap',
+      border: kind === 'outline' ? `1px solid ${THEME.border}` : kind === 'danger' ? '1px solid #e5b4b4' : 'none',
+      backgroundColor: kind === 'primary' ? THEME.primary : kind === 'dark' ? THEME.text : '#fff',
+      color: kind === 'primary' || kind === 'dark' ? '#fff' : kind === 'danger' ? '#c62828' : THEME.text
+    }),
+    smallBtn: (kind: 'dark' | 'outline' | 'danger' = 'outline'): React.CSSProperties => ({
+      height: '34px', padding: '0 12px', borderRadius: '9px', fontSize: '12.5px', fontWeight: 'bold', cursor: 'pointer',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap',
+      border: kind === 'dark' ? 'none' : `1px solid ${kind === 'danger' ? '#e5b4b4' : THEME.border}`,
+      backgroundColor: kind === 'dark' ? THEME.text : '#fff', color: kind === 'dark' ? '#fff' : kind === 'danger' ? '#c62828' : THEME.text
+    })
+  };
+  // 설정 탭 접기/펼치기 머리
+  const settingsHeader = (key: string, title: string, desc: string) => (
+    <button onClick={() => setSettingsOpen(s => ({ ...s, [key]: !s[key] }))} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={A.cardTitle}>{title}</p>
+        <p style={A.help}>{desc}</p>
+      </div>
+      {settingsOpen[key] ? <ChevronUp size={20} color={THEME.subText} /> : <ChevronDown size={20} color={THEME.subText} />}
+    </button>
+  );
+
   const stepBadgeStyle: React.CSSProperties = { flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' };
   const smallActionStyle: React.CSSProperties = { flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', height: '30px', padding: '0 12px', borderRadius: '15px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '12px', fontWeight: 'bold', color: THEME.text, cursor: 'pointer', whiteSpace: 'nowrap' };
 
@@ -1517,396 +1554,498 @@ export default function App() {
       )}
 
       {currentView === 'admin' && (
-        <div style={{ padding: '20px', paddingBottom: '100px' }}>
-          <div style={{ display: 'flex', borderBottom: `2px solid ${THEME.border}`, marginBottom: '20px', overflowX: 'auto', scrollbarWidth: 'none' }}>
-            <div onClick={() => setAdminTab('orders')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'orders' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'orders' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>주문 관리</div>
-            <div onClick={() => { setAdminTab('productAdd'); resetProductForm(); }} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'productAdd' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'productAdd' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>상품 등록</div>
-            <div onClick={() => { setAdminTab('productEdit'); setAdminEditPage(1); }} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'productEdit' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'productEdit' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>상품 수정</div>
-            <div onClick={() => setAdminTab('settings')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'settings' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'settings' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>설정</div>
-            <div onClick={() => setAdminTab('dashboard')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'dashboard' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'dashboard' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>매출/수익</div>
-            <div onClick={handleAdminLogout} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', color: '#c62828', cursor: 'pointer', marginLeft: 'auto' }}>로그아웃</div>
+        <div style={{ padding: '16px 16px 100px', maxWidth: '720px', margin: '0 auto' }}>
+          {/* 관리자 상단: 제목 + 로그아웃 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldCheck size={20} color={THEME.primary} />
+              <span style={{ fontSize: '17px', fontWeight: 'bold' }}>관리자 모드</span>
+            </div>
+            <button onClick={handleAdminLogout} style={A.smallBtn('danger')}>로그아웃</button>
           </div>
 
-          {/* 📊 매출/수익 대시보드 */}
+          {/* 탭: 5칸 같은 너비 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '4px', backgroundColor: '#fff', border: `1px solid ${THEME.border}`, borderRadius: '14px', padding: '4px', marginBottom: '16px', position: 'sticky', top: '64px', zIndex: 50 }}>
+            {([
+              ['orders', '주문', FileText, () => setAdminTab('orders')],
+              ['productAdd', '상품등록', Plus, () => { setAdminTab('productAdd'); resetProductForm(); }],
+              ['productEdit', '상품관리', List, () => { setAdminTab('productEdit'); setAdminEditPage(1); }],
+              ['dashboard', '매출', TrendingUp, () => setAdminTab('dashboard')],
+              ['settings', '설정', LayoutGrid, () => setAdminTab('settings')],
+            ] as [string, string, any, () => void][]).map(([key, label, Icon, onClick]) => {
+              const active = adminTab === key || (key === 'productAdd' && adminTab === 'productAdd');
+              return (
+                <button key={key} onClick={onClick} style={{ height: '52px', border: 'none', borderRadius: '10px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', backgroundColor: active ? THEME.primary : 'transparent', color: active ? '#fff' : THEME.subText, fontSize: '11.5px', fontWeight: 'bold' }}>
+                  <Icon size={18} />{label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 📊 매출/수익 */}
           {adminTab === 'dashboard' && (
             <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '15px' }}>통계 대시보드 (진행중인 주문)</h3>
-              <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>결제완료/배송지연/발송완료 상태의 주문만 합산됩니다.</p>
-              <div style={{ backgroundColor: THEME.primary, color: 'white', padding: '25px', borderRadius: '16px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)', marginBottom: '15px' }}>
-                <p style={{ fontSize: '14px', margin: '0 0 10px 0', opacity: 0.9 }}>총 결제금액 (고객 실 입금액)</p>
-                <p style={{ fontSize: '28px', fontWeight: 'bold', margin: 0 }}>{stats.totalOrderAmount.toLocaleString()}원</p>
+              <div style={A.card}>
+                <p style={A.cardTitle}>매출 요약</p>
+                <p style={A.help}>결제완료 · 배송지연 · 발송완료 주문만 합산합니다. (주문 {stats.orderCount}건)</p>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-                <div style={{ backgroundColor: '#fff', border: `1px solid ${THEME.border}`, padding: '20px', borderRadius: '16px' }}>
-                  <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 10px 0' }}>총 상품매출</p>
-                  <p style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: THEME.text }}>{stats.totalProductSales.toLocaleString()}원</p>
-                </div>
-                <div style={{ backgroundColor: '#fff', border: `1px solid ${THEME.border}`, padding: '20px', borderRadius: '16px' }}>
-                  <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 10px 0' }}>총 매입원가</p>
-                  <p style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: '#c62828' }}>- {stats.totalCost.toLocaleString()}원</p>
-                </div>
-              </div>
-              <div style={{ backgroundColor: THEME.primaryLight, border: `2px solid ${THEME.primary}`, padding: '25px', borderRadius: '16px', textAlign: 'center' }}>
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}><TrendingUp color={THEME.primary} size={30} /></div>
-                <p style={{ fontSize: '15px', color: THEME.primary, margin: '0 0 5px 0', fontWeight: 'bold' }}>순수익 (상품매출 - 매입원가)</p>
-                <p style={{ fontSize: '32px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{stats.netProfit.toLocaleString()}원</p>
+              <div style={{ ...A.row2, marginBottom: '14px' }}>
+                {[
+                  ['총 결제금액', stats.totalOrderAmount, THEME.primary, '고객 실 입금액'],
+                  ['순수익', stats.netProfit, '#2e7d32', stats.totalProductSales > 0 ? `마진율 ${Math.round(stats.netProfit / stats.totalProductSales * 100)}%` : '상품매출 - 매입원가'],
+                  ['상품 매출', stats.totalProductSales, THEME.text, '배송비 제외'],
+                  ['매입 원가', stats.totalCost, '#c62828', '도매가 합계'],
+                ].map(([label, value, color, sub]) => (
+                  <div key={label as string} style={{ ...A.card, marginBottom: 0 }}>
+                    <p style={{ fontSize: '12.5px', color: THEME.subText, margin: '0 0 8px 0' }}>{label}</p>
+                    <p style={{ fontSize: '20px', fontWeight: 'bold', color: color as string, margin: '0 0 4px 0' }}>{(value as number).toLocaleString()}원</p>
+                    <p style={{ fontSize: '11.5px', color: THEME.subText, margin: 0 }}>{sub}</p>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* 🧾 주문 관리 탭 */}
-          {adminTab === 'orders' && (
-            <div>
-              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '15px', scrollbarWidth: 'none' }}>
-                <button onClick={() => setAdminFilter('전체')} style={{ padding: '8px 16px', borderRadius: '20px', whiteSpace: 'nowrap', fontSize: '13px', fontWeight: 'bold', border: adminFilter === '전체' ? 'none' : `1px solid ${THEME.border}`, backgroundColor: adminFilter === '전체' ? THEME.text : '#fff', color: adminFilter === '전체' ? 'white' : THEME.subText }}>전체 {adminOrders.length}</button>
-                {['입금대기', '결제완료', '배송지연', '발송완료'].map(filter => (
-                  <button key={filter} onClick={() => setAdminFilter(filter)} style={{ padding: '8px 16px', borderRadius: '20px', whiteSpace: 'nowrap', fontSize: '13px', fontWeight: 'bold', border: adminFilter === filter ? 'none' : `1px solid ${THEME.border}`, backgroundColor: adminFilter === filter ? THEME.text : '#fff', color: adminFilter === filter ? 'white' : THEME.subText }}>
-                    {filter} {adminOrders.filter(o => o.status === filter).length}
-                  </button>
-                ))}
-              </div>
+          {/* 🧾 주문 관리 */}
+          {adminTab === 'orders' && (() => {
+            const q = orderSearch.trim().replace(/\s+/g, '');
+            const qDigits = q.replace(/[^0-9]/g, '');
+            const visibleOrders = filteredAdminOrders.filter(o => !q
+              || (o.customer_name || '').replace(/\s+/g, '').includes(q)
+              || (o.order_number || '').includes(q)
+              || (qDigits.length >= 3 && (o.phone || '').replace(/[^0-9]/g, '').includes(qDigits)));
+            const countOf = (s: string) => adminOrders.filter(o => o.status === s).length;
+            const nextAction: Record<string, [string, string]> = { '입금대기': ['결제완료', '입금 확인'], '결제완료': ['발송완료', '발송 완료'], '배송지연': ['발송완료', '발송 완료'] };
+            return (
+              <div>
+                {/* 상태별 건수 = 필터 버튼 */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '6px', marginBottom: '8px' }}>
+                  {['입금대기', '결제완료', '배송지연', '발송완료'].map(s => {
+                    const active = adminFilter === s; const st = getStatusStyle(s);
+                    return (
+                      <button key={s} onClick={() => setAdminFilter(active ? '전체' : s)} style={{ height: '62px', borderRadius: '12px', cursor: 'pointer', border: `1px solid ${active ? st.text : THEME.border}`, backgroundColor: active ? st.bg : '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
+                        <span style={{ fontSize: '19px', fontWeight: 'bold', color: st.text }}>{countOf(s)}</span>
+                        <span style={{ fontSize: '11.5px', color: THEME.text, fontWeight: 500 }}>{s}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                  <button onClick={() => setAdminFilter('전체')} style={chipStyle(adminFilter === '전체', 'sub')}>전체 {adminOrders.length}</button>
+                  <button onClick={() => setAdminFilter('취소/환불')} style={chipStyle(adminFilter === '취소/환불', 'sub')}>취소·환불 {countOf('주문취소') + countOf('환불처리')}</button>
+                  <button onClick={fetchAdminOrders} style={{ ...chipStyle(false, 'sub'), marginLeft: 'auto' }}>새로고침</button>
+                </div>
+                <div style={{ position: 'relative', marginBottom: '14px' }}>
+                  <input placeholder="이름 · 연락처 · 주문번호 검색" value={orderSearch} onChange={e => setOrderSearch(e.target.value)} style={{ ...A.input, paddingLeft: '36px' }} />
+                  <Search size={16} color={THEME.subText} style={{ position: 'absolute', left: '12px', top: '14px' }} />
+                </div>
 
-              {filteredAdminOrders.map(order => {
-                const sStyle = getStatusStyle(order.status);
-                const isEditing = editingOrderId === order.id;
-                const itemTotal = order.order_items ? order.order_items.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0) : 0;
-                const shippingFee = order.total_amount - itemTotal;
-                const isItemsExpanded = expandedOrderItems[order.id];
+                {visibleOrders.length === 0 && <div style={{ ...A.card, textAlign: 'center', color: THEME.subText, fontSize: '14px', padding: '40px 18px' }}>해당하는 주문이 없습니다.</div>}
 
-                return (
-                  <div key={order.id} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '16px', marginBottom: '20px', borderTop: `6px solid ${sStyle.bg}`, boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                      <span style={{ fontSize: '15px', fontWeight: 'bold' }}>{order.order_number}</span>
-                      <span style={{ padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', backgroundColor: sStyle.bg, color: sStyle.text }}>{order.status}</span>
-                    </div>
-                    <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 15px 0' }}>{new Date(order.created_at).toLocaleString()}</p>
-
-                    <div style={{ backgroundColor: THEME.bg, padding: '15px', borderRadius: '12px', marginBottom: '15px', fontSize: '13px', color: '#555' }}>
-                      <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', color: THEME.text }}>{order.customer_name} <span style={{fontWeight:'normal', color:THEME.subText}}>({order.phone})</span></p>
-                      <p style={{ margin: '0 0 6px 0' }}>{order.address}</p>
-                      {order.memo && <p style={{ margin: 0, color: THEME.primary }}>요청: {order.memo}</p>}
-                    </div>
-
-                    {/* 주문 상품 상세 (아코디언 기능) */}
-                    <div style={{ borderTop: `1px dashed ${THEME.border}`, paddingTop: '15px', marginBottom: '20px' }}>
-                      <div onClick={() => setExpandedOrderItems({...expandedOrderItems, [order.id]: !isItemsExpanded})} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isItemsExpanded ? '15px' : '0' }}>
-                         <p style={{ fontSize: '14px', fontWeight: 'bold', margin: 0, color: THEME.text }}>주문 상품 상세 <span style={{color: THEME.primary}}>({order.order_items?.length || 0}건)</span></p>
-                         <span style={{ fontSize: '12px', color: THEME.subText, backgroundColor: THEME.bg, padding: '4px 10px', borderRadius: '15px' }}>{isItemsExpanded ? '접어두기 ▲' : '펼쳐보기 ▼'}</span>
+                {visibleOrders.map(order => {
+                  const sStyle = getStatusStyle(order.status);
+                  const isEditing = editingOrderId === order.id;
+                  const itemTotal = order.order_items ? order.order_items.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0) : 0;
+                  const shippingFee = order.total_amount - itemTotal;
+                  const isItemsExpanded = expandedOrderItems[order.id];
+                  const action = nextAction[order.status];
+                  return (
+                    <div key={order.id} style={{ ...A.card, padding: 0, overflow: 'hidden', borderLeft: `4px solid ${sStyle.text}` }}>
+                      <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: '14.5px', fontWeight: 'bold', margin: '0 0 2px 0' }}>{order.order_number}</p>
+                          <p style={{ fontSize: '12px', color: THEME.subText, margin: 0 }}>{new Date(order.created_at).toLocaleString()}</p>
+                        </div>
+                        <span style={{ flexShrink: 0, padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', backgroundColor: sStyle.bg, color: sStyle.text }}>{order.status}</span>
                       </div>
 
-                      {isItemsExpanded && (
-                        <div>
-                          {order.order_items && order.order_items.map((item:any, i:number) => renderOrderItem(item, i))}
+                      <div style={{ padding: '0 16px 12px', fontSize: '13px', color: '#555', lineHeight: 1.6 }}>
+                        <p style={{ margin: 0 }}><strong style={{ color: THEME.text }}>{order.customer_name}</strong> · {order.phone}</p>
+                        <p style={{ margin: 0 }}>{order.address}</p>
+                        {order.memo && <p style={{ margin: '4px 0 0 0', color: THEME.primary }}>요청: {order.memo}</p>}
+                        {order.admin_memo && <p style={{ margin: '4px 0 0 0', color: '#c62828' }}>안내 메모: {order.admin_memo}</p>}
+                        {order.tracking_number && <p style={{ margin: '4px 0 0 0', color: '#2e7d32' }}>송장: {order.tracking_number}</p>}
+                      </div>
+
+                      <div style={{ borderTop: `1px solid ${THEME.border}`, padding: '10px 16px' }}>
+                        <button onClick={() => setExpandedOrderItems({...expandedOrderItems, [order.id]: !isItemsExpanded})} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '13px', color: THEME.text }}>
+                          <span>주문 상품 <strong style={{ color: THEME.primary }}>{order.order_items?.length || 0}건</strong></span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '12px', color: THEME.subText }}>상품 {itemTotal.toLocaleString()} + 배송 {shippingFee.toLocaleString()}</span>
+                            {isItemsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          </span>
+                        </button>
+                        {isItemsExpanded && <div style={{ marginTop: '12px' }}>{order.order_items && order.order_items.map((item:any, i:number) => renderOrderItem(item, i))}</div>}
+                      </div>
+
+                      <div style={{ borderTop: `1px solid ${THEME.border}`, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ flex: 1, fontSize: '18px', fontWeight: 'bold', color: THEME.primary }}>{order.total_amount.toLocaleString()}원</span>
+                        {action && <button onClick={() => updateOrderStatus(order.id, action[0])} style={A.smallBtn('dark')}>{action[1]}</button>}
+                        <button onClick={() => setEditingOrderId(isEditing ? null : order.id)} style={A.smallBtn('outline')}>{isEditing ? '닫기' : '관리'}</button>
+                      </div>
+
+                      {isEditing && (
+                        <div style={{ borderTop: `1px solid ${THEME.border}`, backgroundColor: THEME.bg, padding: '14px 16px' }}>
+                          <div style={A.field}>
+                            <label style={A.label}>송장번호</label>
+                            <input placeholder="예: CJ 123456789" defaultValue={order.tracking_number || ''} onChange={e => setTrackingInputs({...trackingInputs, [order.id]: e.target.value})} style={A.input} />
+                          </div>
+                          <div style={A.field}>
+                            <label style={A.label}>고객 안내 메모 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(주문조회 화면에 보임)</span></label>
+                            <input placeholder="예: 입고 지연으로 3일 후 발송 예정입니다" defaultValue={order.admin_memo || ''} onChange={e => setAdminMemoInputs({...adminMemoInputs, [order.id]: e.target.value})} style={A.input} />
+                          </div>
+                          <button onClick={() => saveOrderInfo(order.id, order.tracking_number, order.admin_memo)} style={{ ...A.btn('dark'), marginBottom: '16px' }}>송장 · 메모 저장</button>
+
+                          <label style={A.label}>상태 변경</label>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '6px', marginBottom: '12px' }}>
+                            {['입금대기', '결제완료', '배송지연', '발송완료', '주문취소', '환불처리'].map(s => {
+                              const st = getStatusStyle(s); const current = order.status === s;
+                              return <button key={s} disabled={current} onClick={() => updateOrderStatus(order.id, s)} style={{ height: '38px', borderRadius: '9px', fontSize: '12.5px', fontWeight: 'bold', cursor: current ? 'default' : 'pointer', border: `1px solid ${current ? st.text : THEME.border}`, backgroundColor: current ? st.bg : '#fff', color: st.text }}>{s === '결제완료' ? '결제완료(입금확인)' : s}</button>;
+                            })}
+                          </div>
+                          <button onClick={() => deleteOrder(order.id)} style={A.btn('danger')}><Trash2 size={15} /> 주문 영구 삭제</button>
                         </div>
                       )}
                     </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: THEME.subText, marginBottom: '8px' }}>
-                      <span>상품 합계</span><span>{itemTotal.toLocaleString()}원</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>
-                      <span>배송비</span><span>{shippingFee.toLocaleString()}원</span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <p style={{ fontSize: '20px', margin: 0, fontWeight: 'bold', color: THEME.primary }}>{order.total_amount.toLocaleString()}원</p>
-                      <button onClick={() => setEditingOrderId(isEditing ? null : order.id)} style={{ padding: '8px 16px', borderRadius: '20px', border: `1px solid ${THEME.border}`, fontSize: '13px', fontWeight: 'bold', backgroundColor: isEditing ? THEME.bg : '#fff' }}>{isEditing ? '닫기' : '관리/수정'}</button>
-                    </div>
-
-                    {isEditing && (
-                      <div style={{ padding: '15px', backgroundColor: THEME.bg, borderRadius: '12px', marginTop: '20px' }}>
-                        <input placeholder="송장번호 (예: CJ 12345)" defaultValue={order.tracking_number || ''} onChange={e => setTrackingInputs({...trackingInputs, [order.id]: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${THEME.border}`, marginBottom: '10px', fontSize: '13px' }} />
-                        <input placeholder="고객 안내 메모" defaultValue={order.admin_memo || ''} onChange={e => setAdminMemoInputs({...adminMemoInputs, [order.id]: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid ${THEME.border}`, marginBottom: '15px', fontSize: '13px' }} />
-                        <button onClick={() => saveOrderInfo(order.id, order.tracking_number, order.admin_memo)} style={{ width: '100%', padding: '12px', backgroundColor: THEME.text, color: 'white', border: 'none', borderRadius: '8px', marginBottom: '20px', fontSize: '13px', fontWeight: 'bold' }}>저장</button>
-
-                        <p style={{ fontSize: '12px', fontWeight: 'bold', color: THEME.subText, marginBottom: '10px' }}>상태 변경</p>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '15px' }}>
-                          <button onClick={() => updateOrderStatus(order.id, '결제완료')} style={{ padding: '10px', backgroundColor: '#1976d2', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>결제승인</button>
-                          <button onClick={() => updateOrderStatus(order.id, '발송완료')} style={{ padding: '10px', backgroundColor: '#2e7d32', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>발송완료</button>
-                          <button onClick={() => updateOrderStatus(order.id, '배송지연')} style={{ padding: '10px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>배송지연</button>
-                          <button onClick={() => updateOrderStatus(order.id, '주문취소')} style={{ padding: '10px', backgroundColor: '#c62828', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>주문취소</button>
-                          <button onClick={() => updateOrderStatus(order.id, '환불처리')} style={{ padding: '10px', backgroundColor: '#9e9e9e', color: 'white', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>환불처리</button>
-                        </div>
-                        <button onClick={() => deleteOrder(order.id)} style={{ width: '100%', padding: '12px', backgroundColor: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', fontWeight: 'bold' }}><Trash2 size={16} /> 주문 영구 삭제</button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* 📦 상품 등록 */}
+          {/* 📦 상품 등록 / 수정 폼 */}
           {adminTab === 'productAdd' && (
-            <div style={{ backgroundColor: '#fff', paddingBottom: '30px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
+            <div>
+              <div style={{ ...A.card, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={A.cardTitle}>{editingProductId ? '상품 수정' : '새 상품 등록'}</p>
+                  <p style={{ ...A.help, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{editingProductId ? prodName : '스마트 복붙 → 사진 → 정보 순서로 채워주세요'}</p>
+                </div>
+                {editingProductId && <button onClick={() => { resetProductForm(); setAdminTab('productEdit'); }} style={A.smallBtn('outline')}>목록으로</button>}
+              </div>
 
               {!editingProductId && (
-                <>
-                  
-                  <div style={{ padding: '20px', backgroundColor: THEME.primaryLight, borderBottom: `1px dashed ${THEME.primary}` }}>
-                    <p style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.primary, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <Scissors size={16} /> 도매 상품 스마트 복붙 (옵션 추출)
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <textarea 
-                        placeholder="도매 사이트 화면의 글자를 쭉 드래그해서 복사한 후 여기에 붙여넣으세요. (이름, 소비자가, 판매가, 색상, 사이즈 포함)" 
-                        value={importText} 
-                        onChange={e => setImportText(e.target.value)} 
-                        style={{ width: '100%', padding: '12px', borderRadius: '8px', border: 'none', fontSize: '13px', resize: 'none', height: '80px' }} 
-                      />
-                      <button onClick={handleSmartPaste} style={{ width: '100%', padding: '12px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px' }}>
-                        텍스트 자동 분석하기
-                      </button>
-                    </div>
-                  </div>
-                </>
+                <div style={{ ...A.card, backgroundColor: THEME.primaryLight, borderColor: THEME.primaryLight }}>
+                  <p style={{ ...A.cardTitle, fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px', color: THEME.primary }}><Scissors size={16} /> 도매 상품 스마트 복붙</p>
+                  <p style={{ ...A.help, marginBottom: '10px' }}>도매 사이트 글자를 드래그해 복사한 뒤 붙여넣으면 브랜드·이름·가격·색상·사이즈가 자동으로 채워집니다.</p>
+                  <textarea placeholder="여기에 붙여넣기" value={importText} onChange={e => setImportText(e.target.value)} style={{ ...A.textarea, height: '84px', resize: 'none', marginBottom: '8px', border: 'none' }} />
+                  <button onClick={handleSmartPaste} style={A.btn('primary')}>텍스트 자동 분석하기</button>
+                </div>
               )}
 
-              <div style={{ display: 'flex', gap: '15px', padding: '20px', backgroundColor: THEME.bg }}>
-                <label style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '180px', backgroundColor: '#fff', borderRadius: '12px', border: `1px dashed ${THEME.border}`, cursor: 'pointer' }}>
-                  <ImagePlus color={THEME.primary} size={36} style={{ marginBottom: '10px' }} />
-                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, textAlign: 'center' }}>{editingProductId ? '썸네일 교체' : '대표 사진 첨부'}<br/><span style={{color:THEME.primary}}>(필수)</span></span>
-                  {prodFiles && <span style={{ marginTop: '8px', fontSize: '12px', color: THEME.primary, fontWeight: 'bold' }}>{prodFiles.length}장 선택됨</span>}
-                  {existingMainImageUrl && !prodFiles && <span style={{ marginTop: '8px', fontSize: '11px', color: THEME.subText }}>등록됨</span>}
-                  <input type="file" accept="image/*" multiple onChange={(e) => setProdFiles(e.target.files)} style={{ display: 'none' }} />
-                </label>
-
-                <label style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '180px', backgroundColor: '#fff', borderRadius: '12px', border: `1px dashed ${THEME.border}`, cursor: 'pointer' }}>
-                  <ImageIcon color={THEME.subText} size={36} style={{ marginBottom: '10px' }} />
-                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, textAlign: 'center' }}>상세 사진 파일<br/>직접 첨부 (선택)</span>
-                  {subProdFiles && <span style={{ marginTop: '8px', fontSize: '12px', color: THEME.primary, fontWeight: 'bold' }}>{subProdFiles.length}장 추가됨</span>}
-                  <input type="file" accept="image/*" multiple onChange={(e) => setSubProdFiles(e.target.files)} style={{ display: 'none' }} />
-                </label>
-              </div>
-
-              <div style={{ padding: '25px 20px' }}>
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-                  <select value={prodBrand} onChange={e => setProdBrand(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }}>
-                    <option value="" disabled>브랜드 선택</option>
-                    {(brands || []).map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-                  </select>
-                  <select value={prodCategory} onChange={e => setProdCategory(e.target.value)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }}>
-                    <option value="" disabled>종류 선택</option>
-                    {(categories || []).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                  </select>
-                </div>
-                <input placeholder="상품명을 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ width: '100%', fontSize: '24px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '15px', marginBottom: '20px', outline: 'none' }} />
-
-                <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: '12px', color: THEME.primary, fontWeight: 'bold', marginBottom: '5px' }}>고객 판매가 (소비자가)</p>
-                    <input type="number" placeholder="예: 25000" value={prodPrice} onChange={e => setProdPrice(e.target.value)} style={{ width: '100%', fontSize: '18px', fontWeight: 'bold', border: 'none', borderBottom: `2px solid ${THEME.primary}`, paddingBottom: '10px', outline: 'none' }} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: '12px', color: THEME.subText, fontWeight: 'bold', marginBottom: '5px' }}>비밀 매입원가 (도매가)</p>
-                    <input type="number" placeholder="예: 15000" value={prodCostPrice} onChange={e => setProdCostPrice(e.target.value)} style={{ width: '100%', fontSize: '18px', fontWeight: 'bold', border: 'none', borderBottom: `1px solid ${THEME.border}`, paddingBottom: '10px', outline: 'none', color: THEME.subText }} />
-                  </div>
-                </div>
-
-                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>옵션 입력 (선택사항 / 쉼표로 구분)</p>
-                <input placeholder="색상 (예: 소라, 브라운)" value={prodColors} onChange={e => setProdColors(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '15px', fontSize: '14px' }} />
-                <input placeholder="사이즈 (예: 1(XS), 2(S), 3(M))" value={prodSizes} onChange={e => setProdSizes(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '25px', fontSize: '14px' }} />
-
-                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', color: THEME.text }}>상세 설명</p>
-                <textarea placeholder="간단한 설명을 적어주세요." rows={3} value={prodDesc} onChange={e => setProdDesc(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', lineHeight: '1.6', marginBottom: '20px' }} />
-
-                <div style={{ backgroundColor: '#fffbe6', border: '1px solid #ffe58f', padding: '15px', borderRadius: '12px', marginBottom: '15px' }}>
-                   <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#d48806', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}><AlertCircle size={16} /> 외부 상세 이미지 링크 붙여넣기 (권장)</p>
-                   <p style={{ fontSize: '12px', color: '#888', marginBottom: '10px', lineHeight: '1.4' }}>사진을 직접 첨부하면 쇼핑몰 로딩이 느려질 수 있습니다.<br/>도매 사이트의 이미지 주소(URL)를 복사하여 이곳에 쉼표(,)나 엔터로 구분하여 붙여넣으시는 것을 가장 추천합니다.</p>
-                   <textarea placeholder="예: https://image.com/detail1.jpg, https://image.com/detail2.jpg" value={inputSubImageUrls} onChange={e => setInputSubImageUrls(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: `1px solid #ffe58f`, fontSize: '13px', resize: 'none', height: '80px', backgroundColor: '#fff' }} />
+              <div style={A.card}>
+                <p style={{ ...A.cardTitle, marginBottom: '12px' }}>사진</p>
+                <div style={A.row2}>
+                  <label style={{ height: '140px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', backgroundColor: THEME.bg, borderRadius: '12px', border: `1px dashed ${prodFiles || existingMainImageUrl ? THEME.primary : THEME.border}`, cursor: 'pointer', overflow: 'hidden', position: 'relative' }}>
+                    {existingMainImageUrl && !prodFiles ? <img src={existingMainImageUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.35 }} /> : null}
+                    <ImagePlus color={THEME.primary} size={28} style={{ position: 'relative' }} />
+                    <span style={{ fontSize: '13px', fontWeight: 'bold', position: 'relative' }}>{editingProductId ? '대표 사진 교체' : '대표 사진'} <span style={{ color: THEME.primary }}>*</span></span>
+                    <span style={{ fontSize: '11.5px', color: prodFiles ? THEME.primary : THEME.subText, position: 'relative', fontWeight: prodFiles ? 'bold' : 'normal' }}>{prodFiles ? `${prodFiles.length}장 선택됨` : existingMainImageUrl ? '등록됨' : '여러 장 선택 가능'}</span>
+                    <input type="file" accept="image/*" multiple onChange={(e) => setProdFiles(e.target.files)} style={{ display: 'none' }} />
+                  </label>
+                  <label style={{ height: '140px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', backgroundColor: THEME.bg, borderRadius: '12px', border: `1px dashed ${subProdFiles ? THEME.primary : THEME.border}`, cursor: 'pointer' }}>
+                    <ImageIcon color={THEME.subText} size={28} />
+                    <span style={{ fontSize: '13px', fontWeight: 'bold' }}>상세 사진 (선택)</span>
+                    <span style={{ fontSize: '11.5px', color: subProdFiles ? THEME.primary : THEME.subText, fontWeight: subProdFiles ? 'bold' : 'normal' }}>{subProdFiles ? `${subProdFiles.length}장 추가됨` : '파일 직접 첨부'}</span>
+                    <input type="file" accept="image/*" multiple onChange={(e) => setSubProdFiles(e.target.files)} style={{ display: 'none' }} />
+                  </label>
                 </div>
               </div>
 
-              <div style={{ padding: '0 20px', display: 'flex', gap: '10px' }}>
-                {editingProductId && <button onClick={resetProductForm} style={{ flex: 1, padding: '16px', backgroundColor: THEME.bg, color: THEME.text, borderRadius: '30px', fontWeight: 'bold', fontSize: '15px', border: 'none' }}>취소</button>}
-                <button onClick={handleSaveProduct} disabled={isUploading} style={{ flex: 2, padding: '16px', backgroundColor: isUploading ? '#ccc' : THEME.primary, color: 'white', borderRadius: '30px', fontWeight: 'bold', fontSize: '16px', border: 'none', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>{isUploading ? '업로드 중...' : (editingProductId ? '수정 내용 저장' : '이 상품 등록하기')}</button>
+              <div style={A.card}>
+                <p style={{ ...A.cardTitle, marginBottom: '12px' }}>기본 정보</p>
+                <div style={{ ...A.row2, ...A.field }}>
+                  <div>
+                    <label style={A.label}>브랜드</label>
+                    <select value={prodBrand} onChange={e => setProdBrand(e.target.value)} style={A.input}>
+                      <option value="">브랜드 선택</option>
+                      {[...(brands || [])].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={A.label}>분류</label>
+                    <select value={prodCategory} onChange={e => setProdCategory(e.target.value)} style={A.input}>
+                      <option value="">분류 선택</option>
+                      {[...(categories || [])].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label style={A.label}>상품명 <span style={{ color: THEME.primary }}>*</span></label>
+                  <input placeholder="상품명을 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ ...A.input, fontWeight: 'bold' }} />
+                </div>
+              </div>
+
+              <div style={A.card}>
+                <p style={{ ...A.cardTitle, marginBottom: '12px' }}>가격</p>
+                <div style={A.row2}>
+                  <div>
+                    <label style={A.label}>판매가 <span style={{ color: THEME.primary }}>*</span></label>
+                    <input type="number" inputMode="numeric" placeholder="예: 25000" value={prodPrice} onChange={e => setProdPrice(e.target.value)} style={{ ...A.input, fontWeight: 'bold', borderColor: THEME.primary }} />
+                  </div>
+                  <div>
+                    <label style={A.label}>매입원가 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(손님에게 안 보임)</span></label>
+                    <input type="number" inputMode="numeric" placeholder="예: 15000" value={prodCostPrice} onChange={e => setProdCostPrice(e.target.value)} style={A.input} />
+                  </div>
+                </div>
+                {Number(prodPrice) > 0 && Number(prodCostPrice) > 0 && (
+                  <p style={{ ...A.help, marginTop: '8px', color: Number(prodPrice) > Number(prodCostPrice) ? '#2e7d32' : '#c62828', fontWeight: 'bold' }}>
+                    마진 {(Number(prodPrice) - Number(prodCostPrice)).toLocaleString()}원 ({Math.round((Number(prodPrice) - Number(prodCostPrice)) / Number(prodPrice) * 100)}%)
+                  </p>
+                )}
+              </div>
+
+              <div style={A.card}>
+                <p style={A.cardTitle}>옵션</p>
+                <p style={{ ...A.help, marginBottom: '12px' }}>쉼표(,)로 구분 · 추가요금은 <strong>JS(+3000원)</strong>처럼 적으면 자동 반영됩니다.</p>
+                <div style={A.field}>
+                  <label style={A.label}>색상</label>
+                  <input placeholder="예: 소라, 브라운" value={prodColors} onChange={e => setProdColors(e.target.value)} style={A.input} />
+                </div>
+                <div>
+                  <label style={A.label}>사이즈</label>
+                  <input placeholder="예: 1(XS), 2(S), 3(M), JS(+3000원)" value={prodSizes} onChange={e => setProdSizes(e.target.value)} style={A.input} />
+                </div>
+                {(prodColors || prodSizes) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '10px' }}>
+                    {[...prodColors.split(','), ...prodSizes.split(',')].map(s => s.trim()).filter(Boolean).map((s, i) => (
+                      <span key={i} style={{ fontSize: '11.5px', padding: '3px 8px', borderRadius: '6px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}` }}>{s}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={A.card}>
+                <p style={{ ...A.cardTitle, marginBottom: '12px' }}>상세</p>
+                <div style={A.field}>
+                  <label style={A.label}>상품 설명</label>
+                  <textarea placeholder="간단한 설명을 적어주세요." rows={3} value={prodDesc} onChange={e => setProdDesc(e.target.value)} style={A.textarea} />
+                </div>
+                <div>
+                  <label style={A.label}>상세 이미지 링크 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(추천)</span></label>
+                  <textarea placeholder="도매 사이트 이미지 주소를 쉼표나 줄바꿈으로 구분해 붙여넣기" value={inputSubImageUrls} onChange={e => setInputSubImageUrls(e.target.value)} style={{ ...A.textarea, height: '84px' }} />
+                  <p style={A.help}>사진 파일을 직접 올리는 것보다 링크가 쇼핑몰이 더 빠릅니다.</p>
+                </div>
+              </div>
+
+              {/* 저장 버튼: 화면 아래 고정 */}
+              <div style={{ position: 'sticky', bottom: '84px', display: 'flex', gap: '8px', backgroundColor: THEME.bg, padding: '8px 0' }}>
+                {editingProductId && <button onClick={() => { resetProductForm(); setAdminTab('productEdit'); }} style={{ ...A.btn('outline'), flex: 1 }}>취소</button>}
+                <button onClick={handleSaveProduct} disabled={isUploading} style={{ ...A.btn('primary'), flex: 2, backgroundColor: isUploading ? '#ccc' : THEME.primary }}>{isUploading ? '업로드 중...' : (editingProductId ? '수정 내용 저장' : '이 상품 등록하기')}</button>
               </div>
             </div>
           )}
 
-          {/* 📝 상품 수정 탭 */}
+          {/* 📝 상품 관리(목록) */}
           {adminTab === 'productEdit' && (
             <div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px', backgroundColor: '#fff', padding: '15px', borderRadius: '16px', border: `1px solid ${THEME.border}` }}>
-                <div style={{ position: 'relative' }}>
-                  <input placeholder="상품명 또는 브랜드 검색" value={adminEditSearch} onChange={(e) => setAdminEditSearch(e.target.value)} style={{ width: '100%', padding: '12px 15px 12px 35px', borderRadius: '8px', border: `1px solid ${THEME.border}`, fontSize: '14px' }} />
-                  <Search size={16} color={THEME.subText} style={{ position: 'absolute', left: '12px', top: '13px' }} />
+              <div style={A.card}>
+                <div style={{ position: 'relative', marginBottom: '8px' }}>
+                  <input placeholder="상품명 또는 브랜드 검색" value={adminEditSearch} onChange={(e) => setAdminEditSearch(e.target.value)} style={{ ...A.input, paddingLeft: '36px' }} />
+                  <Search size={16} color={THEME.subText} style={{ position: 'absolute', left: '12px', top: '14px' }} />
                 </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <select value={adminEditBrand} onChange={(e) => setAdminEditBrand(e.target.value)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${THEME.border}`, fontSize: '13px', backgroundColor: THEME.bg }}>
+                <div style={A.row2}>
+                  <select value={adminEditBrand} onChange={(e) => setAdminEditBrand(e.target.value)} style={{ ...A.input, height: '40px', fontSize: '13px' }}>
                     <option value="전체">모든 브랜드</option>
-                    {brands.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                    {homeBrands.map(b => <option key={b.name} value={b.name}>{b.name} ({b.count})</option>)}
                   </select>
-                  <select value={adminEditCategory} onChange={(e) => setAdminEditCategory(e.target.value)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${THEME.border}`, fontSize: '13px', backgroundColor: THEME.bg }}>
-                    <option value="전체">모든 카테고리</option>
-                    {Object.keys(categoryTree).map(c => <option key={c} value={c}>{c}</option>)}
+                  <select value={adminEditCategory} onChange={(e) => setAdminEditCategory(e.target.value)} style={{ ...A.input, height: '40px', fontSize: '13px' }}>
+                    <option value="전체">모든 분류</option>
+                    {homeMainCats.map(c => <option key={c} value={c}>{c} ({mainCatCounts[c]})</option>)}
                   </select>
                 </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 2px 10px', fontSize: '13px', color: THEME.subText }}>
+                <span>검색 결과 <strong style={{ color: THEME.text }}>{adminDisplayProducts.length.toLocaleString()}</strong>개</span>
+                <button onClick={() => { setAdminTab('productAdd'); resetProductForm(); }} style={A.smallBtn('dark')}><Plus size={14} /> 새 상품</button>
               </div>
 
               {adminCurrentProducts.length > 0 ? (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '15px' }}>
-                    {adminCurrentProducts.map(p => (
-                      <div key={p.id} style={{ display: 'flex', gap: '15px', backgroundColor: '#fff', padding: '15px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                        <img src={p.main_image} style={{ width: '90px', height: '110px', objectFit: 'cover', borderRadius: '10px' }} />
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                          <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 6px 0' }}>{p.brand}</p>
-                          <p style={{ fontSize: '16px', fontWeight: 'bold', margin: '0 0 6px 0' }}>{p.name}</p>
-                          <p style={{ fontSize: '15px', color: THEME.text, margin: '0 0 5px 0' }}>판매가: {p.price.toLocaleString()}원</p>
-                          <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 15px 0' }}>매입원가: {(p.cost_price || 0).toLocaleString()}원</p>
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button onClick={() => openEditProduct(p)} style={{ flex: 1, padding: '8px', backgroundColor: THEME.text, color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', fontWeight: 'bold' }}><Edit size={14} /> 수정</button>
-                            <button onClick={() => deleteProduct(p.id)} style={{ flex: 1, padding: '8px', backgroundColor: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px', fontWeight: 'bold' }}><Trash2 size={14} /> 삭제</button>
+                  <div style={{ backgroundColor: '#fff', borderRadius: '16px', border: `1px solid ${THEME.border}`, overflow: 'hidden' }}>
+                    {adminCurrentProducts.map((p, idx) => {
+                      const margin = (p.price || 0) - (p.cost_price || 0);
+                      return (
+                        <div key={p.id} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px', borderTop: idx === 0 ? 'none' : `1px solid ${THEME.border}` }}>
+                          <img src={p.main_image} loading="lazy" style={{ width: '60px', height: '75px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0, backgroundColor: '#eee' }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: '11.5px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.brand || '자체제작'} <span style={{ color: THEME.subText, fontWeight: 'normal' }}>· {p.category || '분류 없음'}</span></p>
+                            <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 4px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                            <p style={{ fontSize: '12.5px', margin: 0, color: THEME.text }}>
+                              {p.price.toLocaleString()}원
+                              <span style={{ color: THEME.subText }}> · 원가 {(p.cost_price || 0).toLocaleString()}</span>
+                              {p.cost_price > 0 && <span style={{ color: margin > 0 ? '#2e7d32' : '#c62828' }}> · 마진 {margin.toLocaleString()}</span>}
+                            </p>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0 }}>
+                            <button onClick={() => openEditProduct(p)} style={A.smallBtn('dark')}><Edit size={13} /> 수정</button>
+                            <button onClick={() => deleteProduct(p.id)} style={A.smallBtn('danger')}><Trash2 size={13} /> 삭제</button>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                  <div style={{ marginTop: '30px' }}>
+                  <div style={{ marginTop: '20px' }}>
                     {renderPagination(adminEditPage, adminTotalPages, (p) => { setAdminEditPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); }, THEME.text)}
                   </div>
                 </>
               ) : (
-                <div style={{ textAlign: 'center', padding: '60px 0', color: THEME.subText, fontSize: '14px' }}>검색 조건에 맞는 상품이 없습니다.</div>
+                <div style={{ ...A.card, textAlign: 'center', padding: '40px 18px', color: THEME.subText, fontSize: '14px' }}>검색 조건에 맞는 상품이 없습니다.</div>
               )}
             </div>
           )}
 
-          {/* ⚙️ 통합 설정 탭 */}
+          {/* ⚙️ 설정: 항목별 접기/펼치기 */}
           {adminTab === 'settings' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>📝 홈 화면 메인 문구 변경</h3>
-                <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈 화면 상단에 노출되는 두 줄의 인사말을 변경합니다.</p>
-                <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, marginBottom: '8px' }}>메인 문구 (큰 글씨)</p>
-                <textarea rows={2} value={introMainInput} onChange={e => setIntroMainInput(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', marginBottom: '15px' }} />
-                <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, marginBottom: '8px' }}>서브 문구 (작은 글씨)</p>
-                <textarea rows={2} value={introSubInput} onChange={e => setIntroSubInput(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', marginBottom: '15px' }} />
-                <button onClick={handleSaveIntro} disabled={isIntroUploading} style={{ width: '100%', padding: '14px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>{isIntroUploading ? '저장중...' : '문구 변경 적용하기'}</button>
-              </div>
-
-              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>🖼️ 메인 배너 이미지 관리</h3>
-                <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈 화면 중앙에 표시되는 배너 이미지를 변경합니다.</p>
-                <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', cursor: 'pointer', marginBottom: '15px', overflow: 'hidden' }}>
-                  {bannerFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{bannerFile.name} 선택됨</span> 
-                  ) : mainBannerUrl ? ( <img src={mainBannerUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> 
-                  ) : ( <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>사진 첨부 (선택)</span></> )}
-                  <input type="file" accept="image/*" onChange={(e) => setBannerFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
-                </label>
-                <button onClick={handleSaveMainBanner} disabled={isBannerUploading} style={{ width: '100%', padding: '14px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>{isBannerUploading ? '업로드 중...' : '메인 배너 변경 적용하기'}</button>
-              </div>
-
-              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                <h3 style={{ fontSize: '18px', marginBottom: '10px', fontWeight: 'bold', color: THEME.text }}>📢 고객 공지 팝업 관리</h3>
-                <p style={{ fontSize: '13px', color: THEME.subText, marginBottom: '20px' }}>홈페이지 접속 시 바로 보이는 팝업창 내용입니다.</p>
-                <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', cursor: 'pointer', marginBottom: '15px', overflow: 'hidden' }}>
-                  {noticeFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{noticeFile.name} 선택됨</span> 
-                  ) : (notice && notice.image_url) ? ( <img src={notice.image_url} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> 
-                  ) : ( <><ImagePlus color={THEME.subText} size={30} /><span style={{ marginTop: '10px', fontSize: '13px', color: THEME.subText }}>팝업 사진 첨부 (선택)</span></> )}
-                  <input type="file" accept="image/*" onChange={(e) => setNoticeFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
-                </label>
-                <textarea placeholder="공지할 내용을 작성해주세요." rows={5} value={noticeInput} onChange={e => setNoticeInput(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '14px', resize: 'none', marginBottom: '15px' }} />
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={() => handleSaveNotice(false)} disabled={isNoticeUploading} style={{ flex: 1, padding: '14px', backgroundColor: THEME.bg, color: THEME.text, borderRadius: '10px', fontWeight: 'bold', border: `1px solid ${THEME.border}` }}>팝업 숨기기(OFF)</button>
-                  <button onClick={() => handleSaveNotice(true)} disabled={isNoticeUploading} style={{ flex: 1, padding: '14px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>{isNoticeUploading ? '저장중...' : '팝업 띄우기(ON)'}</button>
-                </div>
-              </div>
-
-              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
-                  <h3 style={{ fontSize: '18px', margin: 0, fontWeight: 'bold', color: THEME.text }}>브랜드 관리</h3>
-                  <span style={{ fontSize: '13px', color: THEME.subText }}>총 {brands.length}개</span>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                  <input placeholder="새 브랜드명" value={newBrand} onChange={e => setNewBrand(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addBrand(); }} style={{ flex: 1, minWidth: 0, height: '44px', padding: '0 12px', borderRadius: '10px', border: `1px solid ${THEME.border}` }} />
-                  <button onClick={addBrand} style={{ flexShrink: 0, height: '44px', padding: '0 18px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>추가</button>
-                </div>
-                <div style={{ position: 'relative', marginBottom: '12px' }}>
-                  <input placeholder="브랜드 검색" value={brandSearch} onChange={e => setBrandSearch(e.target.value)} style={{ width: '100%', height: '40px', padding: '0 12px 0 34px', borderRadius: '10px', border: `1px solid ${THEME.border}`, backgroundColor: THEME.bg, fontSize: '13px' }} />
-                  <Search size={15} color={THEME.subText} style={{ position: 'absolute', left: '12px', top: '12px' }} />
-                </div>
-                {/* 상품 많은 순 → 이름순, 2열 표 형태 */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', maxHeight: '360px', overflowY: 'auto' }}>
-                  {[...(brands || [])]
-                    .filter(b => !brandSearch || b.name.toLowerCase().includes(brandSearch.trim().toLowerCase()))
-                    .sort((a, b) => (brandCounts[b.name] || 0) - (brandCounts[a.name] || 0) || a.name.localeCompare(b.name, 'ko'))
-                    .map(b => (
-                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px', padding: '0 8px 0 12px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '10px', minWidth: 0 }}>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: '13.5px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
-                      <span style={{ flexShrink: 0, fontSize: '12px', color: THEME.subText }}>{brandCounts[b.name] || 0}개</span>
-                      <button onClick={() => deleteBrand(b.id)} aria-label={`${b.name} 삭제`} style={{ flexShrink: 0, background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button>
+            <div>
+              {/* 쇼핑몰 정보 (상호·채팅·배송비·계좌·사업자) — 저장 버튼 하나로 전체 저장 */}
+              <div style={A.card}>
+                {settingsHeader('shop', '쇼핑몰 정보', '상호 · 채팅 주소 · 배송비 · 입금 계좌 · 사업자 정보')}
+                {settingsOpen.shop && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ ...A.row2, ...A.field }}>
+                      <div><label style={A.label}>영문 상호</label><input placeholder="예: Hoo & Moi" value={shopSettings.shop_name} onChange={e => setShopSettings({...shopSettings, shop_name: e.target.value})} style={A.input} /></div>
+                      <div><label style={A.label}>한글 상호</label><input placeholder="예: 후앤모아" value={shopSettings.shop_name_kr} onChange={e => setShopSettings({...shopSettings, shop_name_kr: e.target.value})} style={A.input} /></div>
                     </div>
-                  ))}
-                </div>
+                    <div style={A.field}><label style={A.label}>1:1 채팅 주소 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(주문서 전송 · 하단 문의하기)</span></label><input placeholder="https://open.kakao.com/o/..." value={shopSettings.kakao_url} onChange={e => setShopSettings({...shopSettings, kakao_url: e.target.value})} style={A.input} /></div>
+                    <div style={A.field}><label style={A.label}>📢 신상 소식방 주소 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(단체 오픈채팅)</span></label><input placeholder="https://open.kakao.com/o/..." value={shopSettings.community_url} onChange={e => setShopSettings({...shopSettings, community_url: e.target.value})} style={A.input} /></div>
+                    <div style={{ ...A.field, maxWidth: '50%' }}><label style={A.label}>기본 배송비</label><input type="number" inputMode="numeric" placeholder="3500" value={shopSettings.shipping_fee} onChange={e => setShopSettings({...shopSettings, shipping_fee: parseInt(e.target.value) || 0})} style={A.input} /></div>
+
+                    <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '20px 0 10px', paddingTop: '16px', borderTop: `1px solid ${THEME.border}` }}>무통장 입금 계좌</p>
+                    <div style={{ ...A.row2, ...A.field }}>
+                      <div><label style={A.label}>은행명</label><input placeholder="예: 농협" value={editBankInfo.bank_name} onChange={e => setEditBankInfo({...editBankInfo, bank_name: e.target.value})} style={A.input} /></div>
+                      <div><label style={A.label}>예금주</label><input placeholder="예금주" value={editBankInfo.depositor_name} onChange={e => setEditBankInfo({...editBankInfo, depositor_name: e.target.value})} style={A.input} /></div>
+                    </div>
+                    <div style={A.field}><label style={A.label}>계좌번호</label><input placeholder="계좌번호" value={editBankInfo.account_number} onChange={e => setEditBankInfo({...editBankInfo, account_number: e.target.value})} style={A.input} /></div>
+
+                    <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '20px 0 4px', paddingTop: '16px', borderTop: `1px solid ${THEME.border}` }}>사업자 정보</p>
+                    <p style={{ ...A.help, margin: '0 0 10px 0' }}>쇼핑몰 맨 아래에 표시됩니다. 상호명은 한글 상호, 문의하기는 1:1 채팅 주소가 쓰입니다.</p>
+                    <div style={{ ...A.row2, ...A.field }}>
+                      <div><label style={A.label}>대표자</label><input placeholder="대표자" value={shopSettings.biz_owner} onChange={e => setShopSettings({...shopSettings, biz_owner: e.target.value})} style={A.input} /></div>
+                      <div><label style={A.label}>사업자등록번호</label><input placeholder="000-00-00000" value={shopSettings.biz_number} onChange={e => setShopSettings({...shopSettings, biz_number: e.target.value})} style={A.input} /></div>
+                    </div>
+                    <div style={{ ...A.row2, ...A.field }}>
+                      <div><label style={A.label}>통신판매업 신고번호</label><input placeholder="2026-OO-0000" value={shopSettings.ecommerce_number} onChange={e => setShopSettings({...shopSettings, ecommerce_number: e.target.value})} style={A.input} /></div>
+                      <div><label style={A.label}>이메일</label><input placeholder="이메일" value={shopSettings.biz_email} onChange={e => setShopSettings({...shopSettings, biz_email: e.target.value})} style={A.input} /></div>
+                    </div>
+                    <button onClick={saveStoreSettings} style={A.btn('dark')}>쇼핑몰 정보 저장</button>
+                  </div>
+                )}
               </div>
 
-              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                <h3 style={{ fontSize: '18px', marginBottom: '15px', fontWeight: 'bold', color: THEME.text }}>📂 카테고리 관리 (폴더형)</h3>
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-                  <input placeholder="새로운 대분류 생성" value={newMainCat} onChange={e => setNewMainCat(e.target.value)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: `1px solid ${THEME.border}` }} />
-                  <button onClick={() => addCategory(newMainCat, '')} style={{ padding: '0 15px', backgroundColor: THEME.text, color: 'white', borderRadius: '8px', fontWeight: 'bold', border: 'none' }}>생성</button>
-                </div>
+              {/* 홈 화면 꾸미기: 문구 + 배너 */}
+              <div style={A.card}>
+                {settingsHeader('home', '홈 화면', '상단 인사말 · 메인 배너')}
+                {settingsOpen.home && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={A.field}><label style={A.label}>메인 문구 (큰 글씨)</label><textarea rows={2} value={introMainInput} onChange={e => setIntroMainInput(e.target.value)} style={{ ...A.textarea, resize: 'none' }} /></div>
+                    <div style={A.field}><label style={A.label}>서브 문구 (작은 글씨)</label><textarea rows={2} value={introSubInput} onChange={e => setIntroSubInput(e.target.value)} style={{ ...A.textarea, resize: 'none' }} /></div>
+                    <button onClick={handleSaveIntro} disabled={isIntroUploading} style={{ ...A.btn('dark'), marginBottom: '20px' }}>{isIntroUploading ? '저장 중...' : '문구 저장'}</button>
 
-                {Object.keys(categoryTree).map(mainCat => {
-                  const isExpanded = adminCatExpanded[mainCat];
-                  return (
-                    <div key={mainCat} style={{ border: `1px solid ${THEME.border}`, borderRadius: '10px', marginBottom: '10px', overflow: 'hidden' }}>
-                      <div onClick={() => setAdminCatExpanded({...adminCatExpanded, [mainCat]: !isExpanded})} style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', backgroundColor: isExpanded ? THEME.primaryLight : '#fff', cursor: 'pointer', fontWeight: 'bold', color: THEME.text }}>
-                        <span>📁 {mainCat}</span>
-                        {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                      </div>
+                    <label style={{ ...A.label, paddingTop: '16px', borderTop: `1px solid ${THEME.border}` }}>메인 배너 이미지</label>
+                    <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', border: `1px dashed ${THEME.border}`, cursor: 'pointer', marginBottom: '10px', overflow: 'hidden' }}>
+                      {bannerFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{bannerFile.name} 선택됨</span>
+                      ) : mainBannerUrl ? ( <img src={mainBannerUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : ( <><ImagePlus color={THEME.subText} size={28} /><span style={{ marginTop: '8px', fontSize: '13px', color: THEME.subText }}>눌러서 사진 선택</span></> )}
+                      <input type="file" accept="image/*" onChange={(e) => setBannerFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
+                    </label>
+                    <button onClick={handleSaveMainBanner} disabled={isBannerUploading} style={A.btn('dark')}>{isBannerUploading ? '업로드 중...' : '배너 적용'}</button>
+                  </div>
+                )}
+              </div>
 
-                      {isExpanded && (
-                        <div style={{ padding: '15px', backgroundColor: '#fdfdfd' }}>
-                          {categoryTree[mainCat].length > 0 ? (
-                            categoryTree[mainCat].map(sub => {
-                              const targetCat = categories.find(c => c.name === `${mainCat} > ${sub}`);
-                              return (
-                                <div key={sub} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px dashed #eee', fontSize: '14px', color: THEME.subText }}>
-                                  <span>- {sub}</span>
-                                  <Trash2 size={16} color="#c62828" style={{ cursor: 'pointer' }} onClick={() => targetCat && deleteCategory(targetCat.id)} />
-                                </div>
-                              );
-                            })
-                          ) : ( <p style={{ fontSize: '13px', color: '#999', margin: '0 0 10px 0' }}>등록된 중분류가 없습니다.</p> )}
+              {/* 공지 팝업 */}
+              <div style={A.card}>
+                {settingsHeader('notice', '공지 팝업', notice?.is_active ? '현재: 켜짐 (손님 접속 시 표시)' : '현재: 꺼짐')}
+                {settingsOpen.notice && (
+                  <div style={{ marginTop: '16px' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '150px', backgroundColor: THEME.bg, borderRadius: '12px', border: `1px dashed ${THEME.border}`, cursor: 'pointer', marginBottom: '10px', overflow: 'hidden' }}>
+                      {noticeFile ? ( <span style={{ fontSize: '14px', color: THEME.primary, fontWeight: 'bold' }}>{noticeFile.name} 선택됨</span>
+                      ) : (notice && notice.image_url) ? ( <img src={notice.image_url} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      ) : ( <><ImagePlus color={THEME.subText} size={28} /><span style={{ marginTop: '8px', fontSize: '13px', color: THEME.subText }}>팝업 사진 (선택)</span></> )}
+                      <input type="file" accept="image/*" onChange={(e) => setNoticeFile(e.target.files ? e.target.files[0] : null)} style={{ display: 'none' }} />
+                    </label>
+                    <div style={A.field}><textarea placeholder="공지할 내용을 작성해주세요." rows={5} value={noticeInput} onChange={e => setNoticeInput(e.target.value)} style={A.textarea} /></div>
+                    <div style={A.row2}>
+                      <button onClick={() => handleSaveNotice(false)} disabled={isNoticeUploading} style={A.btn('outline')}>저장 후 끄기</button>
+                      <button onClick={() => handleSaveNotice(true)} disabled={isNoticeUploading} style={A.btn('primary')}>{isNoticeUploading ? '저장 중...' : '저장 후 켜기'}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-                          <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
-                            <input placeholder={`'${mainCat}' 안에 중분류 추가`} value={newSubCats[mainCat] || ''} onChange={e => setNewSubCats({...newSubCats, [mainCat]: e.target.value})} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: `1px solid ${THEME.border}`, fontSize: '13px' }} />
-                            <button onClick={() => addCategory(mainCat, newSubCats[mainCat])} style={{ padding: '0 12px', backgroundColor: THEME.primary, color: 'white', borderRadius: '6px', border: 'none', fontSize: '12px' }}>추가</button>
-                          </div>
+              {/* 브랜드 관리 */}
+              <div style={A.card}>
+                {settingsHeader('brand', `브랜드 관리 (${brands.length})`, '추가 · 검색 · 삭제')}
+                {settingsOpen.brand && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                      <input placeholder="새 브랜드명" value={newBrand} onChange={e => setNewBrand(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addBrand(); }} style={{ ...A.input, flex: 1, minWidth: 0 }} />
+                      <button onClick={addBrand} style={A.btn('dark', false)}>추가</button>
+                    </div>
+                    <div style={{ position: 'relative', marginBottom: '10px' }}>
+                      <input placeholder="브랜드 검색" value={brandSearch} onChange={e => setBrandSearch(e.target.value)} style={{ ...A.input, height: '40px', paddingLeft: '34px', backgroundColor: THEME.bg, fontSize: '13px' }} />
+                      <Search size={15} color={THEME.subText} style={{ position: 'absolute', left: '12px', top: '12px' }} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', maxHeight: '360px', overflowY: 'auto' }}>
+                      {[...(brands || [])]
+                        .filter(b => !brandSearch || b.name.toLowerCase().includes(brandSearch.trim().toLowerCase()))
+                        .sort((a, b) => (brandCounts[b.name] || 0) - (brandCounts[a.name] || 0) || a.name.localeCompare(b.name, 'ko'))
+                        .map(b => (
+                        <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px', padding: '0 6px 0 12px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '10px', minWidth: 0 }}>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: '13.5px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
+                          <span style={{ flexShrink: 0, fontSize: '12px', color: THEME.subText }}>{brandCounts[b.name] || 0}개</span>
+                          <button onClick={() => deleteBrand(b.id)} aria-label={`${b.name} 삭제`} style={{ flexShrink: 0, background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button>
                         </div>
-                      )}
+                      ))}
                     </div>
-                  )
-                })}
+                  </div>
+                )}
               </div>
 
-              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                <h3 style={{ fontSize: '18px', marginBottom: '15px', fontWeight: 'bold', color: THEME.text }}>⚙️ 쇼핑몰 기본 및 계좌 설정</h3>
-                <input placeholder="영문 상호 (예: Hoo & Moi)" value={shopSettings.shop_name} onChange={e => setShopSettings({...shopSettings, shop_name: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="한글 상호 (예: 후앤모아)" value={shopSettings.shop_name_kr} onChange={e => setShopSettings({...shopSettings, shop_name_kr: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 4px 0' }}>1:1 채팅 주소 (주문서 전송·하단 문의하기)</p>
-                <input placeholder="카카오톡 1:1 오픈채팅 주소" value={shopSettings.kakao_url} onChange={e => setShopSettings({...shopSettings, kakao_url: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 4px 0' }}>📢 신상 소식방 주소 (단체 오픈채팅)</p>
-                <input placeholder="신상 소식방 오픈채팅 주소" value={shopSettings.community_url} onChange={e => setShopSettings({...shopSettings, community_url: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input type="number" placeholder="기본 배송비 (예: 3500)" value={shopSettings.shipping_fee} onChange={e => setShopSettings({...shopSettings, shipping_fee: parseInt(e.target.value) || 0})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '20px' }} />
-
-                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>사업자 정보 (쇼핑몰 맨 아래 표시)</p>
-                <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 10px 0' }}>상호명은 위의 한글 상호, 문의하기는 1:1 채팅 주소가 표시됩니다.</p>
-                <input placeholder="대표자" value={shopSettings.biz_owner} onChange={e => setShopSettings({...shopSettings, biz_owner: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="사업자등록번호 (예: 000-00-00000)" value={shopSettings.biz_number} onChange={e => setShopSettings({...shopSettings, biz_number: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="통신판매업 신고번호" value={shopSettings.ecommerce_number} onChange={e => setShopSettings({...shopSettings, ecommerce_number: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="이메일" value={shopSettings.biz_email} onChange={e => setShopSettings({...shopSettings, biz_email: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '20px' }} />
-
-                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>무통장 입금 계좌</p>
-                <input placeholder="은행명 (예: 농협)" value={editBankInfo.bank_name} onChange={e => setEditBankInfo({...editBankInfo, bank_name: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="계좌번호" value={editBankInfo.account_number} onChange={e => setEditBankInfo({...editBankInfo, account_number: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="예금주" value={editBankInfo.depositor_name} onChange={e => setEditBankInfo({...editBankInfo, depositor_name: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '15px' }} />
-
-                <button onClick={saveStoreSettings} style={{ width: '100%', padding: '14px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>전체 설정 저장하기</button>
+              {/* 카테고리 관리 */}
+              <div style={A.card}>
+                {settingsHeader('category', '분류(카테고리) 관리', '대분류 · 중분류 추가와 삭제')}
+                {settingsOpen.category && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                      <input placeholder="새 대분류 이름" value={newMainCat} onChange={e => setNewMainCat(e.target.value)} style={{ ...A.input, flex: 1, minWidth: 0 }} />
+                      <button onClick={() => addCategory(newMainCat, '')} style={A.btn('dark', false)}>생성</button>
+                    </div>
+                    <div style={{ border: `1px solid ${THEME.border}`, borderRadius: '12px', overflow: 'hidden' }}>
+                      {Object.keys(categoryTree).sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'ko')).map((mainCat, idx) => {
+                        const isExpanded = adminCatExpanded[mainCat];
+                        return (
+                          <div key={mainCat} style={{ borderTop: idx === 0 ? 'none' : `1px solid ${THEME.border}` }}>
+                            <button onClick={() => setAdminCatExpanded({...adminCatExpanded, [mainCat]: !isExpanded})} style={{ width: '100%', height: '46px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 14px', background: isExpanded ? THEME.primaryLight : '#fff', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', color: THEME.text, textAlign: 'left' }}>
+                              <span style={{ flex: 1 }}>{mainCat}</span>
+                              <span style={{ fontSize: '12px', fontWeight: 'normal', color: THEME.subText }}>상품 {mainCatCounts[mainCat] || 0} · 중분류 {categoryTree[mainCat].length}</span>
+                              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
+                            {isExpanded && (
+                              <div style={{ padding: '6px 14px 14px', backgroundColor: '#fdfdfd' }}>
+                                {categoryTree[mainCat].length > 0 ? categoryTree[mainCat].map(sub => {
+                                  const targetCat = categories.find(c => c.name === `${mainCat} > ${sub}`);
+                                  return (
+                                    <div key={sub} style={{ display: 'flex', alignItems: 'center', height: '38px', borderBottom: `1px dashed ${THEME.border}`, fontSize: '13.5px' }}>
+                                      <span style={{ flex: 1 }}>{sub}</span>
+                                      <span style={{ fontSize: '12px', color: THEME.subText, marginRight: '8px' }}>{subCatCounts[`${mainCat} > ${sub}`] || 0}개</span>
+                                      {targetCat ? <button onClick={() => deleteCategory(targetCat.id)} aria-label={`${sub} 삭제`} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button> : <span style={{ fontSize: '11px', color: THEME.subText }}>기본</span>}
+                                    </div>
+                                  );
+                                }) : <p style={{ fontSize: '13px', color: THEME.subText, margin: '8px 0' }}>등록된 중분류가 없습니다.</p>}
+                                <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+                                  <input placeholder={`'${mainCat}' 안에 중분류 추가`} value={newSubCats[mainCat] || ''} onChange={e => setNewSubCats({...newSubCats, [mainCat]: e.target.value})} style={{ ...A.input, height: '38px', fontSize: '13px', flex: 1, minWidth: 0 }} />
+                                  <button onClick={() => addCategory(mainCat, newSubCats[mainCat])} style={A.smallBtn('dark')}>추가</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
