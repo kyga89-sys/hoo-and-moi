@@ -6,6 +6,10 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// 🔒 손님 화면에서 읽을 수 있는 컬럼 (supabase/security/02_lock_down.sql 의 grant 목록과 같아야 함)
+const PUBLIC_PRODUCT_COLUMNS = 'id, name, price, category, main_image, description, is_active, created_at, sizes, sub_images, brand, colors';
+const STORE_SETTINGS_COLUMNS = 'id, bank_name, account_number, depositor_name, shop_name, shop_name_kr, kakao_url, shipping_fee';
+
 const THEME = {
   primary: '#F06A7D',
   primaryLight: '#FFF0F2',
@@ -34,7 +38,7 @@ export default function App() {
 
   // --- 수파베이스 연동 설정 ---
   const [shopSettings, setShopSettings] = useState({
-    shop_name: 'Hoo & Moi', shop_name_kr: '후앤모아', admin_password: 'dhrnfl64', kakao_url: 'https://open.kakao.com/o/sy8ZbjNi', shipping_fee: 3500
+    shop_name: 'Hoo & Moi', shop_name_kr: '후앤모아', kakao_url: 'https://open.kakao.com/o/sy8ZbjNi', shipping_fee: 3500
   });
   const [bankInfo, setBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
   const [editBankInfo, setEditBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
@@ -87,7 +91,10 @@ export default function App() {
   const [editOrderInputs, setEditOrderInputs] = useState({ name: '', phone: '', address: '', memo: '' });
 
   // --- 관리자 정보 ---
+  const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [adminTab, setAdminTab] = useState('orders'); 
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
   const [adminFilter, setAdminFilter] = useState('전체'); 
@@ -182,12 +189,12 @@ export default function App() {
 
   const fetchStoreSettings = async () => {
     try {
-      const { data } = await supabase.from('store_settings').select('*').limit(1);
+      const { data } = await supabase.from('store_settings').select(STORE_SETTINGS_COLUMNS).order('id', { ascending: true }).limit(1);
       if (data && data.length > 0) {
         setBankInfo(data[0]); setEditBankInfo(data[0]);
         setShopSettings({
           shop_name: data[0].shop_name || 'Hoo & Moi', shop_name_kr: data[0].shop_name_kr || '후앤모아',
-          admin_password: data[0].admin_password || 'dhrnfl64', kakao_url: data[0].kakao_url || 'https://open.kakao.com/o/sy8ZbjNi',
+          kakao_url: data[0].kakao_url || 'https://open.kakao.com/o/sy8ZbjNi',
           shipping_fee: data[0].shipping_fee !== undefined ? data[0].shipping_fee : 3500
         });
       }
@@ -198,7 +205,7 @@ export default function App() {
     try {
       const updateData = {
         bank_name: editBankInfo.bank_name, account_number: editBankInfo.account_number, depositor_name: editBankInfo.depositor_name,
-        shop_name: shopSettings.shop_name, shop_name_kr: shopSettings.shop_name_kr, admin_password: shopSettings.admin_password, 
+        shop_name: shopSettings.shop_name, shop_name_kr: shopSettings.shop_name_kr,
         kakao_url: shopSettings.kakao_url, shipping_fee: shopSettings.shipping_fee
       };
 
@@ -237,7 +244,8 @@ export default function App() {
     }
   };
 
-  const fetchProducts = async () => {
+  // 🔒 매입원가(cost_price)는 관리자 로그인 상태에서만 불러옴
+  const fetchProducts = async (withCost = isAdmin) => {
     // 🚨 타입 에러 해결: any[]로 타입 명시
     let allProducts: any[] = [];
     let from = 0;
@@ -247,7 +255,7 @@ export default function App() {
     while (fetchMore) {
       const { data } = await supabase
         .from("products")
-        .select("*")
+        .select(withCost ? "*" : PUBLIC_PRODUCT_COLUMNS)
         .order("created_at", { ascending: false })
         .range(from, from + step - 1);
 
@@ -532,24 +540,21 @@ export default function App() {
   const totalItemAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalOrderAmount = totalItemAmount + totalShippingFee;
 
+  // 🔒 주문은 서버 함수(create_order)에서 상품 가격·옵션 추가금·배송비를 다시 계산해서 저장
   const submitOrder = async () => {
-    const fullOrderAddress = `${orderAddress} ${orderDetailAddress}`.trim();
-    const orderNumber = `HM-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Math.floor(Math.random() * 1000)}`;
-    const { data: newOrder, error } = await supabase.from('orders').insert([{ order_number: orderNumber, customer_name: orderName, phone: orderPhone, address: fullOrderAddress, memo: orderMemo, total_amount: totalOrderAmount, status: '입금대기' }]).select();
-    if (newOrder && newOrder[0]) {
-      const orderItems = cart.map(item => { 
-        const optionText = [item.selectedColor, item.selectedSize].filter(Boolean).join(' / '); 
-        return { 
-          order_id: newOrder[0].id, 
-          product_name: `[${item.brand || '자체제작'}] ${item.name} ${optionText ? `(${optionText})` : ''}`, 
-          price: item.price, 
-          quantity: item.quantity, 
-          cost_price: item.cost_price 
-        }; 
+    if (isSubmittingOrder) return;
+    setIsSubmittingOrder(true);
+    try {
+      const fullOrderAddress = `${orderAddress} ${orderDetailAddress}`.trim();
+      const { data: newOrder, error } = await supabase.rpc('create_order', {
+        p_customer_name: orderName, p_phone: orderPhone, p_address: fullOrderAddress, p_memo: orderMemo,
+        p_items: cart.map(item => ({ product_id: item.id, size: item.selectedSize, color: item.selectedColor, quantity: item.quantity }))
       });
-      await supabase.from('order_items').insert(orderItems);
-      setCurrentOrder(newOrder[0]); setCart([]); setCurrentView('orderComplete'); 
-    }
+      if (error) throw error;
+      setCurrentOrder(newOrder); setCart([]); setCurrentView('orderComplete');
+    } catch (err: any) {
+      alert("주문 접수에 실패했습니다.\n" + (err?.message || '잠시 후 다시 시도해주세요.'));
+    } finally { setIsSubmittingOrder(false); }
   };
 
   const searchMyOrder = async () => {
@@ -557,22 +562,53 @@ export default function App() {
     if(!lookupOrderNumber && !lookupName) return alert("연락처와 함께 '주문번호' 또는 '주문자 이름'을 입력해주세요.");
 
     try {
-      let query = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).eq('phone', lookupPhone);
-
-      if (lookupOrderNumber) query = query.eq('order_number', lookupOrderNumber);
-      else if (lookupName) query = query.eq('customer_name', lookupName);
-
-      const { data } = await query;
-      if (data && data.length > 0) setMyOrders(data); 
+      const { data, error } = await supabase.rpc('lookup_orders', { p_phone: lookupPhone, p_order_number: lookupOrderNumber || null, p_name: lookupName || null });
+      if (error) throw error;
+      if (data && data.length > 0) setMyOrders(data);
       else alert("입력하신 정보와 일치하는 주문 내역이 없습니다. 연락처나 이름을 다시 확인해주세요.");
-    } catch (err) {}
+    } catch (err: any) { alert("조회에 실패했습니다. 잠시 후 다시 시도해주세요."); }
   };
 
   const openCustomerEdit = (order: any) => { setEditingCustomerOrderId(order.id); setEditOrderInputs({ name: order.customer_name, phone: order.phone, address: order.address, memo: order.memo || '' }); };
-  const saveCustomerEdit = async (id: string) => { await supabase.from('orders').update({ customer_name: editOrderInputs.name, phone: editOrderInputs.phone, address: editOrderInputs.address, memo: editOrderInputs.memo }).eq('id', id); alert("수정되었습니다."); setEditingCustomerOrderId(null); searchMyOrder(); };
+  const saveCustomerEdit = async (id: string) => {
+    const { data: updated, error } = await supabase.rpc('update_my_order', { p_order_id: id, p_phone: lookupPhone, p_customer_name: editOrderInputs.name, p_new_phone: editOrderInputs.phone, p_address: editOrderInputs.address, p_memo: editOrderInputs.memo });
+    if (error) return alert("수정 실패: " + error.message);
+    if (!updated) return alert("입금대기 상태의 주문만 수정할 수 있습니다.");
+    alert("수정되었습니다."); setEditingCustomerOrderId(null);
+    setLookupPhone(editOrderInputs.phone);
+    const { data } = await supabase.rpc('lookup_orders', { p_phone: editOrderInputs.phone, p_order_number: lookupOrderNumber || null, p_name: lookupOrderNumber ? null : editOrderInputs.name });
+    if (data) setMyOrders(data);
+  };
 
   const fetchAdminOrders = async () => { const { data } = await supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }); if (data) setAdminOrders(data); };
-  const handleAdminLogin = async () => { if (adminPassword === shopSettings.admin_password) { await fetchAdminOrders(); setCurrentView('admin'); } else alert("비밀번호 오류"); };
+
+  // 🔒 관리자 로그인: Supabase 계정 + admin_users 목록에 등록된 이메일만 통과
+  const enterAdmin = async () => {
+    const { data: ok } = await supabase.rpc('is_admin');
+    if (!ok) { await supabase.auth.signOut(); setIsAdmin(false); return false; }
+    setIsAdmin(true);
+    await Promise.all([fetchAdminOrders(), fetchProducts(true)]);
+    setCurrentView('admin');
+    return true;
+  };
+  const handleAdminLogin = async () => {
+    if (!adminEmail || !adminPassword) return alert("이메일과 비밀번호를 입력해주세요.");
+    const { error } = await supabase.auth.signInWithPassword({ email: adminEmail.trim(), password: adminPassword });
+    if (error) return alert("로그인 실패: 이메일 또는 비밀번호를 확인해주세요.");
+    setAdminPassword('');
+    if (!(await enterAdmin())) alert("관리자로 등록되지 않은 계정입니다.");
+  };
+  const openAdmin = async () => {
+    const { data } = await supabase.auth.getSession();
+    if (data.session && (await enterAdmin())) return;
+    setCurrentView('adminLogin');
+  };
+  const handleAdminLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAdmin(false); setAdminOrders([]);
+    await fetchProducts(false);
+    handleGoHome();
+  };
   const updateOrderStatus = async (id: string, status: string) => { if (window.confirm(`[${status}](으)로 변경하시겠습니까?`)) { await supabase.from('orders').update({ status }).eq('id', id); fetchAdminOrders(); } };
   const saveOrderInfo = async (id: string, currentTracking: string, currentMemo: string) => {
     const tracking = trackingInputs[id] !== undefined ? trackingInputs[id] : currentTracking;
@@ -1009,7 +1045,7 @@ export default function App() {
             </div>
           </div>
           <p style={{fontSize:'11px', color:THEME.subText, textAlign:'center', marginBottom:'20px'}}>※ 본 견적서는 주문 확인용으로, 실제 결제 금액과 차이가 있을 수 있습니다.</p>
-          <button onClick={submitOrder} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold' }}>주문하기</button>
+          <button onClick={submitOrder} disabled={isSubmittingOrder} style={{ width: '100%', padding: '16px', backgroundColor: isSubmittingOrder ? '#ccc' : THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold' }}>{isSubmittingOrder ? '주문 접수 중...' : '주문하기'}</button>
         </div>
       )}
 
@@ -1156,7 +1192,8 @@ export default function App() {
         <div style={{ padding: '50px 20px', textAlign: 'center', backgroundColor: '#fff', minHeight: '100vh' }}>
           <Lock size={50} color={THEME.primary} style={{ margin: '0 auto 20px auto' }} />
           <h3 style={{ fontSize: '22px', fontWeight: 'bold', marginBottom: '30px' }}>관리자 접속</h3>
-          <input type="password" placeholder="비밀번호" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '20px', fontSize: '15px', textAlign: 'center' }} />
+          <input type="email" autoComplete="username" placeholder="관리자 이메일" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '10px', fontSize: '15px', textAlign: 'center' }} />
+          <input type="password" autoComplete="current-password" placeholder="비밀번호" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAdminLogin(); }} style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '20px', fontSize: '15px', textAlign: 'center' }} />
           <button onClick={handleAdminLogin} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontWeight: 'bold', fontSize: '16px' }}>접속하기</button>
         </div>
       )}
@@ -1169,6 +1206,7 @@ export default function App() {
             <div onClick={() => { setAdminTab('productEdit'); setAdminEditPage(1); }} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'productEdit' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'productEdit' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>상품 수정</div>
             <div onClick={() => setAdminTab('settings')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'settings' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'settings' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>설정</div>
             <div onClick={() => setAdminTab('dashboard')} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', borderBottom: adminTab === 'dashboard' ? `3px solid ${THEME.primary}` : 'none', color: adminTab === 'dashboard' ? THEME.primary : THEME.subText, cursor: 'pointer' }}>매출/수익</div>
+            <div onClick={handleAdminLogout} style={{ whiteSpace: 'nowrap', padding: '12px 15px', fontWeight: 'bold', color: '#c62828', cursor: 'pointer', marginLeft: 'auto' }}>로그아웃</div>
           </div>
 
           {/* 📊 매출/수익 대시보드 */}
@@ -1521,7 +1559,6 @@ export default function App() {
                 <h3 style={{ fontSize: '18px', marginBottom: '15px', fontWeight: 'bold', color: THEME.text }}>⚙️ 쇼핑몰 기본 및 계좌 설정</h3>
                 <input placeholder="영문 상호 (예: Hoo & Moi)" value={shopSettings.shop_name} onChange={e => setShopSettings({...shopSettings, shop_name: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
                 <input placeholder="한글 상호 (예: 후앤모아)" value={shopSettings.shop_name_kr} onChange={e => setShopSettings({...shopSettings, shop_name_kr: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="관리자 비밀번호" value={shopSettings.admin_password} onChange={e => setShopSettings({...shopSettings, admin_password: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
                 <input placeholder="카카오톡 오픈채팅 주소" value={shopSettings.kakao_url} onChange={e => setShopSettings({...shopSettings, kakao_url: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
                 <input type="number" placeholder="기본 배송비 (예: 3500)" value={shopSettings.shipping_fee} onChange={e => setShopSettings({...shopSettings, shipping_fee: parseInt(e.target.value) || 0})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '20px' }} />
 
@@ -1551,7 +1588,7 @@ export default function App() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'lookup' ? THEME.primary : THEME.subText, cursor: 'pointer' }} onClick={() => setCurrentView('lookup')}>
             <FileText size={24} /><span style={{ fontSize: '11px', marginTop: '6px', fontWeight: currentView === 'lookup' ? 'bold' : 'normal' }}>주문내역</span>
           </div>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'adminLogin' || currentView === 'admin' ? THEME.primary : '#DDDDDD', cursor: 'pointer' }} onClick={() => setCurrentView('adminLogin')}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', color: currentView === 'adminLogin' || currentView === 'admin' ? THEME.primary : '#DDDDDD', cursor: 'pointer' }} onClick={openAdmin}>
             <Lock size={24} /><span style={{ fontSize: '11px', marginTop: '6px', fontWeight: currentView === 'adminLogin' || currentView === 'admin' ? 'bold' : 'normal' }}>관리자</span>
           </div>
         </div>
