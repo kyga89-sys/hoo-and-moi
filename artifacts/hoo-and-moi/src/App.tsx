@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, Grid2x2, Grid3x3, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp, ImageIcon, AlertCircle, Eye, EyeOff, Megaphone, Copy, Send } from 'lucide-react';
+import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, Grid2x2, Grid3x3, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp, ImageIcon, AlertCircle, Eye, EyeOff, Megaphone, Copy, Send, SquarePlus, Ellipsis, EllipsisVertical, ArrowDown, Menu } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -30,6 +30,18 @@ const getListPrice = (p: any, rate: number) => {
 };
 const getDiscountRate = (price: number, listPrice: number) => listPrice > price ? Math.round((listPrice - price) / listPrice * 100) : 0;
 const isOptionSoldOut = (opt: string) => /품절/.test(opt || '');
+
+// 📲 앱 설치 안내용: 어떤 휴대폰·브라우저로 열었는지
+const getInstallEnv = () => {
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1);
+  const isKakao = /KAKAOTALK/i.test(ua);
+  const isInApp = isKakao || /Instagram|FBAN|FBAV|NAVER\(inapp|Line\/|DaumApps|everytimeApp/i.test(ua);
+  const isIOSChrome = isIOS && /CriOS/i.test(ua);
+  const isIPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1);
+  const isSamsung = /SamsungBrowser/i.test(ua);
+  return { isIOS, isKakao, isInApp, isIOSChrome, isIPad, isSamsung };
+};
 
 // 홈 노출 순서: 순서 미지정(새 상품)이 맨 앞 → 지정한 순서대로 → 같으면 최신순(불러온 순서 유지)
 const sortByDisplayOrder = (list: any[]) => list
@@ -321,6 +333,11 @@ export default function App() {
   const [newSubCats, setNewSubCats] = useState<Record<string, string>>({});
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [installGuide, setInstallGuide] = useState<null | 'ios' | 'android' | 'inapp'>(null);
+  // 이미 홈 화면 앱으로 열었으면 "앱 다운" 버튼 숨김
+  const [isAppMode, setIsAppMode] = useState(() => {
+    try { return window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true; } catch (e) { return false; }
+  });
 
   // 🔙 뒤로가기: 화면 이동마다 브라우저 기록을 남겨서 휴대폰 뒤로가기·상단 < 버튼이
   //    직전 화면으로 돌아가고, 홈으로 돌아오면 보던 위치(스크롤)를 그대로 복원
@@ -387,6 +404,14 @@ export default function App() {
     fetchProducts(); fetchCategories(); fetchBrands(); fetchNoticesAndBanner(); fetchStoreSettings();
     const handleBeforeInstallPrompt = (e: any) => { e.preventDefault(); setDeferredPrompt(e); };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    const handleInstalled = () => { setDeferredPrompt(null); setInstallGuide(null); setIsAppMode(true); };
+    window.addEventListener('appinstalled', handleInstalled);
+    // 안드로이드 "앱 설치" 버튼이 뜨려면 서비스 워커가 있어야 함 (public/sw.js, 화면은 저장하지 않음)
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+    // 카카오톡에서 "앱 다운"을 눌러 외부 브라우저로 넘어온 경우 → 설치 안내를 바로 띄움
+    if (new URLSearchParams(window.location.search).get('install') === '1') {
+      setTimeout(() => setInstallGuide(getInstallEnv().isIOS ? 'ios' : 'android'), 800);
+    }
 
     if (!document.getElementById('daum-postcode-script')) {
       const script = document.createElement('script');
@@ -395,17 +420,25 @@ export default function App() {
       script.async = true;
       document.head.appendChild(script);
     }
-    return () => { window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt); };
+    return () => { window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt); window.removeEventListener('appinstalled', handleInstalled); };
   }, []);
 
+  // 📲 앱 다운: 안드로이드 Chrome = 버튼 한 번에 설치 창 / 아이폰 = 그림 안내 / 카카오톡 = 외부 브라우저로 열기
   const handleInstallClick = async () => {
+    const env = getInstallEnv();
     if (deferredPrompt) {
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') setDeferredPrompt(null);
-    } else {
-      alert("아이폰(Safari)은 하단의 [공유] 버튼(↑)을 누르고 [홈 화면에 추가]를 선택해주세요!");
+      return;
     }
+    if (env.isKakao) {
+      // 카카오톡 안에서는 홈 화면 추가가 안 됨 → Safari / Chrome 으로 열고 설치 안내 띄우기
+      window.location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(`${window.location.origin}/?install=1`);
+      return;
+    }
+    if (env.isInApp) return setInstallGuide('inapp');
+    setInstallGuide(env.isIOS ? 'ios' : 'android');
   };
 
   const handleSearchAddress = () => {
@@ -1211,10 +1244,77 @@ export default function App() {
         @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
         * { font-family: 'Pretendard', sans-serif; letter-spacing: -0.3px; }
         *, *::before, *::after { box-sizing: border-box; }
+        @keyframes hm-bounce { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, 10px); } }
         .serif-text { font-family: 'Noto Serif KR', serif !important; }
         input, textarea, button, select { outline: none; }
         input:focus, textarea:focus { border-color: ${THEME.primary} !important; }
       `}</style>
+
+      {/* 📲 앱 설치 안내창 */}
+      {installGuide && (() => {
+        const env = getInstallEnv();
+        const step = (n: number, body: React.ReactNode) => (
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '14px' }}>
+            <span style={{ flexShrink: 0, width: '26px', height: '26px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{n}</span>
+            <div style={{ flex: 1, fontSize: '14.5px', lineHeight: 1.55, color: THEME.text, paddingTop: '2px' }}>{body}</div>
+          </div>
+        );
+        const chip = (icon: React.ReactNode, label: string) => (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', margin: '0 2px', borderRadius: '6px', backgroundColor: '#eef3ff', color: '#1a5fd0', fontWeight: 'bold', fontSize: '13px', verticalAlign: 'middle' }}>{icon}{label}</span>
+        );
+        // 아이폰 Safari 는 공유 버튼이 화면 맨 아래 가운데 → 그쪽을 가리키는 화살표
+        const showBottomArrow = installGuide === 'ios' && !env.isIOSChrome && !env.isIPad;
+        return (
+          <div onClick={() => setInstallGuide(null)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 10000, display: 'flex', alignItems: showBottomArrow ? 'flex-start' : 'center', justifyContent: 'center', padding: showBottomArrow ? '70px 16px 16px' : '16px' }}>
+            <div onClick={e => e.stopPropagation()} style={{ backgroundColor: '#fff', borderRadius: '22px', width: '100%', maxWidth: '380px', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '20px 20px 14px', backgroundColor: THEME.primaryLight }}>
+                <img src="/icon-192.png" alt="" style={{ width: '52px', height: '52px', borderRadius: '12px', flexShrink: 0 }} />
+                <div>
+                  <p style={{ fontSize: '17px', fontWeight: 'bold', margin: '0 0 2px 0', color: THEME.text }}>{shopSettings.shop_name_kr} 앱 설치</p>
+                  <p style={{ fontSize: '12.5px', margin: 0, color: THEME.subText }}>홈 화면에 아이콘이 생겨 앱처럼 바로 열려요</p>
+                </div>
+              </div>
+              <div style={{ padding: '18px 20px 8px' }}>
+                {installGuide === 'ios' && (env.isIOSChrome ? (<>
+                  {step(1, <>주소창 오른쪽의 {chip(<Share size={13} />, '공유')} 버튼을 눌러요</>)}
+                  {step(2, <>{chip(<SquarePlus size={13} />, '홈 화면에 추가')}를 눌러요<br /><span style={{ fontSize: '12.5px', color: THEME.subText }}>안 보이면 메뉴를 아래로 내려보세요</span></>)}
+                  {step(3, <>오른쪽 위 <strong>추가</strong>를 누르면 끝!</>)}
+                </>) : (<>
+                  {step(1, <>{env.isIPad ? '화면 오른쪽 위' : '화면 맨 아래 가운데'}의 {chip(<Share size={13} />, '공유')} 버튼을 눌러요<br /><span style={{ fontSize: '12.5px', color: THEME.subText }}>버튼이 안 보이면 화면을 살짝 아래로 내리거나, {chip(<Ellipsis size={13} />, '')}를 먼저 눌러요</span></>)}
+                  {step(2, <>메뉴를 아래로 내려 {chip(<SquarePlus size={13} />, '홈 화면에 추가')}를 눌러요</>)}
+                  {step(3, <>오른쪽 위 <strong>추가</strong>를 누르면 끝! 🎉</>)}
+                </>))}
+                {installGuide === 'android' && (deferredPrompt ? (
+                  <>
+                    <p style={{ fontSize: '14.5px', margin: '0 0 14px 0', lineHeight: 1.55 }}>아래 버튼을 누르고 <strong>설치</strong>를 누르면 끝이에요.</p>
+                    <button onClick={() => { setInstallGuide(null); handleInstallClick(); }} style={{ width: '100%', height: '50px', border: 'none', borderRadius: '25px', backgroundColor: THEME.primary, color: '#fff', fontSize: '16px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>지금 설치하기</button>
+                  </>
+                ) : env.isSamsung ? (<>
+                  {step(1, <>화면 아래 {chip(<Menu size={13} />, '메뉴')}를 눌러요</>)}
+                  {step(2, <>{chip(<SquarePlus size={13} />, '현재 페이지 추가')} → <strong>홈 화면</strong>을 눌러요</>)}
+                </>) : (<>
+                  {step(1, <>오른쪽 위 {chip(<EllipsisVertical size={13} />, '메뉴')}를 눌러요</>)}
+                  {step(2, <>{chip(<Download size={13} />, '앱 설치')} 또는 {chip(<SquarePlus size={13} />, '홈 화면에 추가')}를 눌러요</>)}
+                  <p style={{ fontSize: '12.5px', color: THEME.subText, margin: '0 0 12px 0' }}>이미 설치했다면 홈 화면에서 {shopSettings.shop_name_kr} 아이콘을 찾아보세요.</p>
+                </>))}
+                {installGuide === 'inapp' && (<>
+                  <p style={{ fontSize: '14.5px', margin: '0 0 14px 0', lineHeight: 1.55 }}>지금 앱(인스타그램·네이버 등) 안에서 열려 있어서 바로 설치가 안 돼요.</p>
+                  {step(1, <>오른쪽 위(또는 아래) {chip(<Ellipsis size={13} />, '메뉴')}를 눌러요</>)}
+                  {step(2, <><strong>{env.isIOS ? 'Safari로 열기' : '다른 브라우저로 열기'}</strong>를 누른 뒤 다시 <strong>앱 다운</strong>을 눌러요</>)}
+                  <button onClick={async () => { const ok = await copyText(window.location.origin); alert(ok ? '주소를 복사했어요. Safari·Chrome 주소창에 붙여넣어 주세요.' : window.location.origin); }} style={{ width: '100%', height: '44px', border: `1px solid ${THEME.border}`, borderRadius: '22px', backgroundColor: '#fff', fontSize: '14px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>쇼핑몰 주소 복사하기</button>
+                </>)}
+                <button onClick={() => setInstallGuide(null)} style={{ width: '100%', height: '44px', border: 'none', backgroundColor: 'transparent', color: THEME.subText, fontSize: '14px', cursor: 'pointer' }}>닫기</button>
+              </div>
+            </div>
+            {showBottomArrow && (
+              <div style={{ position: 'fixed', left: '50%', bottom: '14px', transform: 'translateX(-50%)', animation: 'hm-bounce 1.1s ease-in-out infinite', display: 'flex', flexDirection: 'column', alignItems: 'center', color: '#fff', pointerEvents: 'none' }}>
+                <span style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '2px', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>여기 공유 버튼</span>
+                <ArrowDown size={34} strokeWidth={3} />
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {showNoticeModal && notice && currentView !== 'admin' && currentView !== 'adminLogin' && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(2px)' }}>
@@ -1234,12 +1334,12 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
            {currentView !== 'home' ? (
              <button onClick={handleBack} aria-label="뒤로가기" style={{ background: 'none', border: 'none', padding: '4px', marginLeft: '-6px', cursor: 'pointer', display: 'flex', color: THEME.text }}><ChevronLeft size={26} /></button>
-           ) : (
+           ) : !isAppMode ? (
              <button onClick={handleInstallClick} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: THEME.primaryLight, padding: '6px 10px', borderRadius: '15px', border: 'none' }}>
                <Download size={13} color={THEME.primary} />
                <span style={{fontSize: '12px', color: THEME.primary, fontWeight: 'bold', whiteSpace: 'nowrap'}}>앱 다운</span>
              </button>
-           )}
+           ) : null}
         </div>
         <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '23px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={handleGoHome}>{shopSettings.shop_name}</h1>
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '16px' }}>
