@@ -10,7 +10,97 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const PUBLIC_PRODUCT_COLUMNS = 'id, name, price, category, main_image, description, is_active, created_at, sizes, sub_images, brand, colors';
 const BASE_STORE_SETTINGS_COLUMNS = 'id, bank_name, account_number, depositor_name, shop_name, shop_name_kr, kakao_url, shipping_fee';
 // supabase/updates/01_batch1_settings.sql 로 추가된 칸
-const STORE_SETTINGS_COLUMNS = `${BASE_STORE_SETTINGS_COLUMNS}, community_url, biz_owner, biz_number, ecommerce_number, biz_email`;
+const BATCH1_STORE_SETTINGS_COLUMNS = `${BASE_STORE_SETTINGS_COLUMNS}, community_url, biz_owner, biz_number, ecommerce_number, biz_email`;
+// supabase/updates/02_home_layout.sql 로 추가된 칸 (홈 탭·브랜드 순서)
+const STORE_SETTINGS_COLUMNS = `${BATCH1_STORE_SETTINGS_COLUMNS}, home_layout`;
+
+// 홈 노출 순서: 순서 미지정(새 상품)이 맨 앞 → 지정한 순서대로 → 같으면 최신순(불러온 순서 유지)
+const sortByDisplayOrder = (list: any[]) => list
+  .map((p, i) => ({ p, i }))
+  .sort((a, b) => {
+    const da = a.p.display_order, db = b.p.display_order;
+    if (da == null && db == null) return a.i - b.i;
+    if (da == null) return -1;
+    if (db == null) return 1;
+    return da - db || a.i - b.i;
+  })
+  .map(x => x.p);
+
+// 저장된 순서 목록을 기준으로 정렬 (목록에 없는 것은 뒤로, 기존 기준 유지)
+const orderBySaved = <T,>(items: T[], keyOf: (t: T) => string, saved: string[] | undefined) => {
+  if (!saved || saved.length === 0) return items;
+  const rank = new Map(saved.map((k, i) => [k, i]));
+  return items.map((t, i) => ({ t, i })).sort((a, b) => {
+    const ra = rank.has(keyOf(a.t)) ? rank.get(keyOf(a.t))! : 1e6 + a.i;
+    const rb = rank.has(keyOf(b.t)) ? rank.get(keyOf(b.t))! : 1e6 + b.i;
+    return ra - rb;
+  }).map(x => x.t);
+};
+
+// ↕️ 손가락(마우스)으로 끌어서 순서 바꾸는 목록. 손잡이(≡)를 누른 채 위아래로 움직이면 자리가 바뀜
+function SortableList<T>({ items, keyOf, onChange, render, maxHeight }: {
+  items: T[]; keyOf: (t: T) => string; onChange: (next: T[]) => void;
+  render: (item: T, index: number, handle: React.ReactNode) => React.ReactNode; maxHeight?: string;
+}) {
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  useEffect(() => {
+    if (!dragKey) return;
+    const onMove = (e: PointerEvent) => {
+      e.preventDefault();
+      const list = itemsRef.current;
+      const from = list.findIndex(t => keyOf(t) === dragKey);
+      if (from < 0) return;
+      // 새 위치 = 끌고 있는 항목을 뺀 나머지 중, 손가락보다 가운데가 위에 있는 항목 수
+      const rest = list.filter((_, i) => i !== from);
+      let to = 0;
+      rest.forEach(t => {
+        const el = rowRefs.current[keyOf(t)];
+        if (el) { const r = el.getBoundingClientRect(); if (e.clientY > r.top + r.height / 2) to++; }
+      });
+      if (to !== from) {
+        rest.splice(to, 0, list[from]);
+        onChange(rest);
+      }
+      // 끝에 가까우면 자동 스크롤
+      const box = boxRef.current;
+      if (box && maxHeight) {
+        const br = box.getBoundingClientRect();
+        if (e.clientY < br.top + 40) box.scrollTop -= 12;
+        else if (e.clientY > br.bottom - 40) box.scrollTop += 12;
+      } else {
+        if (e.clientY < 90) window.scrollBy(0, -12);
+        else if (e.clientY > window.innerHeight - 110) window.scrollBy(0, 12);
+      }
+    };
+    const onUp = () => setDragKey(null);
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp); };
+  }, [dragKey]);
+
+  return (
+    <div ref={boxRef} style={{ maxHeight, overflowY: maxHeight ? 'auto' : undefined, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {items.map((item, index) => {
+        const k = keyOf(item);
+        const handle = (
+          <span onPointerDown={e => { e.preventDefault(); setDragKey(k); }} aria-label="끌어서 순서 바꾸기"
+            style={{ flexShrink: 0, width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', touchAction: 'none', color: '#999', fontSize: '18px', userSelect: 'none' }}>≡</span>
+        );
+        return (
+          <div key={k} ref={el => { rowRefs.current[k] = el; }} style={{ opacity: dragKey === k ? 0.6 : 1, transform: dragKey === k ? 'scale(1.02)' : 'none', transition: 'transform 0.1s', boxShadow: dragKey === k ? '0 6px 16px rgba(0,0,0,0.15)' : 'none', borderRadius: '10px' }}>
+            {render(item, index, handle)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const DEFAULT_COMMUNITY_URL = 'https://open.kakao.com/o/g48GLFNi';
 const GRID_STORAGE_KEY = 'hm_grid_cols';
@@ -95,7 +185,7 @@ export default function App() {
 
   // --- 썸네일 배열 (2열 / 3열), 고른 배열은 브라우저에 기억 ---
   const [gridCols, setGridCols] = useState<2 | 3>(() => {
-    try { const v = localStorage.getItem(GRID_STORAGE_KEY); return v === '3' || v === '4' ? 3 : 2; } catch (e) { return 2; }
+    try { return localStorage.getItem(GRID_STORAGE_KEY) === '2' ? 2 : 3; } catch (e) { return 3; }
   });
   const homePerPage = gridCols === 3 ? 30 : 20;
   const toggleGridCols = () => {
@@ -188,6 +278,15 @@ export default function App() {
   const [brandSearch, setBrandSearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState<Record<string, boolean>>({ shop: true });
+
+  // --- 홈 화면 배치 (분류 탭·브랜드 순서는 store_settings.home_layout, 상품 순서는 products.display_order) ---
+  const [homeLayout, setHomeLayout] = useState<{ category_order?: string[]; brand_order?: string[] }>({});
+  const [layoutCats, setLayoutCats] = useState<string[] | null>(null);
+  const [layoutBrands, setLayoutBrands] = useState<string[] | null>(null);
+  const [layoutProducts, setLayoutProducts] = useState<any[] | null>(null);
+  const [layoutProductLimit, setLayoutProductLimit] = useState(60);
+  const [layoutBrandPick, setLayoutBrandPick] = useState('');
+  const [isSavingLayout, setIsSavingLayout] = useState(false);
   const [adminCatExpanded, setAdminCatExpanded] = useState<Record<string, boolean>>({});
   const [newMainCat, setNewMainCat] = useState('');
   const [newSubCats, setNewSubCats] = useState<Record<string, string>>({});
@@ -301,10 +400,12 @@ export default function App() {
 
   const fetchStoreSettings = async () => {
     try {
-      const first = await supabase.from('store_settings').select(STORE_SETTINGS_COLUMNS).order('id', { ascending: true }).limit(1);
-      let data: any[] | null = first.data;
-      // 새 칸 SQL 실행 전이라면 기존 칸만으로 불러오기
-      if (first.error) data = (await supabase.from('store_settings').select(BASE_STORE_SETTINGS_COLUMNS).order('id', { ascending: true }).limit(1)).data;
+      // 새 칸 SQL 실행 전이라면 있는 칸만으로 불러오기 (최신 → 1차 → 기본 순서로 시도)
+      let data: any[] | null = null;
+      for (const cols of [STORE_SETTINGS_COLUMNS, BATCH1_STORE_SETTINGS_COLUMNS, BASE_STORE_SETTINGS_COLUMNS]) {
+        const res = await supabase.from('store_settings').select(cols).order('id', { ascending: true }).limit(1);
+        if (!res.error) { data = res.data; break; }
+      }
       if (data && data.length > 0) {
         setBankInfo(data[0]); setEditBankInfo(data[0]);
         setShopSettings({
@@ -315,6 +416,7 @@ export default function App() {
           biz_owner: data[0].biz_owner || '', biz_number: data[0].biz_number || '',
           ecommerce_number: data[0].ecommerce_number || '', biz_email: data[0].biz_email || ''
         });
+        setHomeLayout(data[0].home_layout && typeof data[0].home_layout === 'object' ? data[0].home_layout : {});
       }
     } catch (err) {}
   };
@@ -371,13 +473,19 @@ export default function App() {
     let from = 0;
     const step = 1000;
     let fetchMore = true;
+    // 노출 순서 칸(display_order) SQL 실행 전이면 그 칸 없이 불러오기
+    let publicCols = `${PUBLIC_PRODUCT_COLUMNS}, display_order`;
 
     while (fetchMore) {
-      const { data } = await supabase
+      let { data, error } = await supabase
         .from("products")
-        .select(withCost ? "*" : PUBLIC_PRODUCT_COLUMNS)
+        .select(withCost ? "*" : publicCols)
         .order("created_at", { ascending: false })
         .range(from, from + step - 1);
+      if (error && !withCost && publicCols !== PUBLIC_PRODUCT_COLUMNS) {
+        publicCols = PUBLIC_PRODUCT_COLUMNS;
+        ({ data, error } = await supabase.from("products").select(publicCols).order("created_at", { ascending: false }).range(from, from + step - 1));
+      }
 
       if (data && data.length > 0) {
         allProducts = [...allProducts, ...data];
@@ -391,7 +499,7 @@ export default function App() {
     }
 
     if (allProducts.length > 0) {
-      setProducts(allProducts);
+      setProducts(sortByDisplayOrder(allProducts));
       const pId = new URLSearchParams(window.location.search).get("productId");
       if (pId) {
         const targetProduct = allProducts.find((p: any) => p.id.toString() === pId);
@@ -435,10 +543,11 @@ export default function App() {
     if (main && rest.length) { const key = `${main} > ${rest.join(' > ')}`; subCatCounts[key] = (subCatCounts[key] || 0) + 1; }
     if (p.brand) brandCounts[p.brand] = (brandCounts[p.brand] || 0) + 1;
   });
-  const homeMainCats = Object.keys(mainCatCounts).sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'ko'));
+  // 설정 > 홈 화면 배치에서 저장한 순서가 있으면 그 순서, 없으면 기본 순서
+  const homeMainCats = orderBySaved(Object.keys(mainCatCounts).sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'ko')), c => c, homeLayout.category_order);
   const homeSubCats = activeLargeCat === '전체' ? [] : Object.keys(subCatCounts)
     .filter(k => k.startsWith(`${activeLargeCat} > `)).map(k => k.slice(activeLargeCat.length + 3)).sort((a, b) => a.localeCompare(b, 'ko'));
-  const homeBrands = Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko'));
+  const homeBrands = orderBySaved(Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko')), b => b.name, homeLayout.brand_order);
 
   const showBrandRow = brandTabOpen || activeBrand !== '전체';
   const isBrandTab = showBrandRow;
@@ -911,6 +1020,40 @@ export default function App() {
       backgroundColor: kind === 'dark' ? THEME.text : '#fff', color: kind === 'dark' ? '#fff' : kind === 'danger' ? '#c62828' : THEME.text
     })
   };
+  // ↕️ 홈 화면 배치 저장
+  const layoutSqlHint = "\n\n(처음이라면 supabase/updates/02_home_layout.sql 을 먼저 실행해주세요)";
+  const saveTabLayout = async () => {
+    if (!bankInfo.id) return alert("쇼핑몰 설정을 먼저 저장해주세요.");
+    setIsSavingLayout(true);
+    try {
+      const next = { ...homeLayout, category_order: layoutCats ?? homeMainCats, brand_order: layoutBrands ?? homeBrands.map(b => b.name) };
+      const { error } = await supabase.from('store_settings').update({ home_layout: next }).eq('id', bankInfo.id);
+      if (error) throw error;
+      setHomeLayout(next); setLayoutCats(null); setLayoutBrands(null);
+      alert("분류 탭 · 브랜드 순서를 저장했습니다. 홈 화면에 바로 반영됩니다.");
+    } catch (e: any) { alert("저장 실패: " + e.message + layoutSqlHint); } finally { setIsSavingLayout(false); }
+  };
+  const saveProductLayout = async () => {
+    if (!layoutProducts) return;
+    setIsSavingLayout(true);
+    try {
+      const { error } = await supabase.rpc('set_product_order', { p_ids: layoutProducts.map((p: any) => p.id) });
+      if (error) throw error;
+      setLayoutProducts(null); await fetchProducts(true);
+      alert("상품 순서를 저장했습니다. 홈 화면에 바로 반영됩니다.");
+    } catch (e: any) { alert("저장 실패: " + e.message + layoutSqlHint); } finally { setIsSavingLayout(false); }
+  };
+  const resetProductLayout = async () => {
+    if (!window.confirm("상품 순서를 모두 지우고 최신 등록순으로 되돌릴까요?")) return;
+    setIsSavingLayout(true);
+    try {
+      const { error } = await supabase.rpc('set_product_order', { p_ids: null });
+      if (error) throw error;
+      setLayoutProducts(null); await fetchProducts(true);
+      alert("최신 등록순으로 초기화했습니다.");
+    } catch (e: any) { alert("초기화 실패: " + e.message + layoutSqlHint); } finally { setIsSavingLayout(false); }
+  };
+
   // 설정 탭 접기/펼치기 머리
   const settingsHeader = (key: string, title: string, desc: string) => (
     <button onClick={() => setSettingsOpen(s => ({ ...s, [key]: !s[key] }))} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
@@ -1931,6 +2074,93 @@ export default function App() {
                     <button onClick={saveStoreSettings} style={A.btn('dark')}>쇼핑몰 정보 저장</button>
                   </div>
                 )}
+              </div>
+
+              {/* ↕️ 홈 화면 배치: 분류 탭 · 브랜드 · 상품 순서 (끌어서 변경 후 저장) */}
+              <div style={A.card}>
+                {settingsHeader('layout', '홈 화면 배치', '분류 탭 · 브랜드 · 상품 순서를 손잡이(≡)를 끌어서 바꾸기')}
+                {settingsOpen.layout && (() => {
+                  const cats = layoutCats ?? homeMainCats;
+                  const brandNames = layoutBrands ?? homeBrands.map(b => b.name);
+                  const prodList = layoutProducts ?? products;
+                  const shown = prodList.slice(0, layoutProductLimit);
+                  const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', height: '46px', padding: '0 8px 0 4px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '10px' };
+                  const numStyle: React.CSSProperties = { flexShrink: 0, width: '24px', textAlign: 'center', fontSize: '12px', color: THEME.subText, fontWeight: 'bold' };
+                  const moveTop = <T,>(list: T[], i: number) => { const n = [...list]; const [x] = n.splice(i, 1); n.unshift(x); return n; };
+                  return (
+                    <div style={{ marginTop: '16px' }}>
+                      <p style={{ ...A.help, margin: '0 0 14px 0', backgroundColor: THEME.primaryLight, color: THEME.text, padding: '10px 12px', borderRadius: '10px' }}>
+                        오른쪽 <strong>≡</strong>를 꾹 누른 채 위아래로 끌면 자리가 바뀝니다. <strong>저장</strong>을 눌러야 홈 화면에 반영돼요.
+                      </p>
+
+                      {/* 1) 분류 탭 순서 */}
+                      <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 4px' }}>① 분류 탭 순서</p>
+                      <p style={{ ...A.help, margin: '0 0 8px' }}>홈 화면 맨 위 탭입니다. [전체] [브랜드]는 항상 맨 앞에 있어요.</p>
+                      <SortableList items={cats} keyOf={c => c} onChange={setLayoutCats} render={(c, i, handle) => (
+                        <div style={rowStyle}>
+                          <span style={numStyle}>{i + 1}</span>
+                          <span style={{ flex: 1, fontSize: '14px', fontWeight: 500 }}>{c}</span>
+                          <span style={{ fontSize: '12px', color: THEME.subText }}>{mainCatCounts[c] || 0}개</span>
+                          {i > 0 && <button onClick={() => setLayoutCats(moveTop(cats, i))} style={A.smallBtn('outline')}>맨 앞</button>}
+                          {handle}
+                        </div>
+                      )} />
+
+                      {/* 2) 브랜드 순서 */}
+                      <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '20px 0 4px', paddingTop: '16px', borderTop: `1px solid ${THEME.border}` }}>② 브랜드 순서</p>
+                      <p style={{ ...A.help, margin: '0 0 8px' }}>[브랜드] 탭을 눌렀을 때 나오는 순서입니다.</p>
+                      <SortableList items={brandNames} keyOf={b => b} onChange={setLayoutBrands} maxHeight="320px" render={(b, i, handle) => (
+                        <div style={rowStyle}>
+                          <span style={numStyle}>{i + 1}</span>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: '14px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b}</span>
+                          <span style={{ fontSize: '12px', color: THEME.subText }}>{brandCounts[b] || 0}개</span>
+                          {i > 0 && <button onClick={() => setLayoutBrands(moveTop(brandNames, i))} style={A.smallBtn('outline')}>맨 앞</button>}
+                          {handle}
+                        </div>
+                      )} />
+                      <div style={{ ...A.row2, marginTop: '10px' }}>
+                        <button onClick={() => { setLayoutCats(null); setLayoutBrands(null); }} style={A.btn('outline')}>되돌리기</button>
+                        <button onClick={saveTabLayout} disabled={isSavingLayout} style={A.btn('dark')}>{isSavingLayout ? '저장 중...' : '① ② 순서 저장'}</button>
+                      </div>
+
+                      {/* 3) 상품 노출 순서 */}
+                      <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '24px 0 4px', paddingTop: '16px', borderTop: `1px solid ${THEME.border}` }}>③ 상품 노출 순서</p>
+                      <p style={{ ...A.help, margin: '0 0 10px' }}>홈 화면 [전체]에 보이는 순서입니다. 앞쪽 {layoutProductLimit}개를 끌어서 정리할 수 있고, 새로 등록한 상품은 자동으로 맨 앞에 나옵니다.</p>
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                        <select value={layoutBrandPick} onChange={e => setLayoutBrandPick(e.target.value)} style={{ ...A.input, height: '40px', fontSize: '13px', flex: 1, minWidth: 0 }}>
+                          <option value="">브랜드 선택</option>
+                          {homeBrands.map(b => <option key={b.name} value={b.name}>{b.name} ({b.count})</option>)}
+                        </select>
+                        <button disabled={!layoutBrandPick} onClick={() => {
+                          const picked = prodList.filter((p: any) => p.brand === layoutBrandPick);
+                          setLayoutProducts([...picked, ...prodList.filter((p: any) => p.brand !== layoutBrandPick)]);
+                        }} style={{ ...A.smallBtn('dark'), height: '40px', opacity: layoutBrandPick ? 1 : 0.4 }}>이 브랜드 상품 맨 앞으로</button>
+                      </div>
+                      <SortableList items={shown} keyOf={(p: any) => String(p.id)} maxHeight="420px"
+                        onChange={next => setLayoutProducts([...next, ...prodList.slice(layoutProductLimit)])}
+                        render={(p: any, i, handle) => (
+                          <div style={{ ...rowStyle, height: '58px' }}>
+                            <span style={numStyle}>{i + 1}</span>
+                            <img src={p.main_image} loading="lazy" style={{ width: '38px', height: '46px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0, backgroundColor: '#eee' }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ fontSize: '11px', color: THEME.primary, fontWeight: 'bold', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.brand || '자체제작'}</p>
+                              <p style={{ fontSize: '13px', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                            </div>
+                            {i > 0 && <button onClick={() => setLayoutProducts(moveTop(prodList, i))} style={A.smallBtn('outline')}>맨 앞</button>}
+                            {handle}
+                          </div>
+                        )} />
+                      {prodList.length > layoutProductLimit && (
+                        <button onClick={() => setLayoutProductLimit(n => n + 60)} style={{ ...A.btn('outline'), marginTop: '8px', height: '40px', fontSize: '13px' }}>다음 60개 더 보기 ({layoutProductLimit} / {prodList.length})</button>
+                      )}
+                      <div style={{ ...A.row2, marginTop: '10px' }}>
+                        <button onClick={() => setLayoutProducts(null)} style={A.btn('outline')}>되돌리기</button>
+                        <button onClick={saveProductLayout} disabled={isSavingLayout || !layoutProducts} style={{ ...A.btn('dark'), opacity: layoutProducts ? 1 : 0.4 }}>{isSavingLayout ? '저장 중...' : '③ 상품 순서 저장'}</button>
+                      </div>
+                      <button onClick={resetProductLayout} disabled={isSavingLayout} style={{ ...A.btn('danger'), marginTop: '8px', height: '40px', fontSize: '13px' }}>상품 순서를 최신 등록순으로 초기화</button>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* 홈 화면 꾸미기: 문구 + 배너 */}
