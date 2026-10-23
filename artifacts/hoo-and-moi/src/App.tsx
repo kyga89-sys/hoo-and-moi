@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, FileText, LayoutGrid, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp, ImageIcon, AlertCircle } from 'lucide-react';
+import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, Grid2x2, Grid3x3, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp, ImageIcon, AlertCircle, Eye, EyeOff, Megaphone, Copy, Send } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -8,7 +8,38 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // 🔒 손님 화면에서 읽을 수 있는 컬럼 (supabase/security/02_lock_down.sql 의 grant 목록과 같아야 함)
 const PUBLIC_PRODUCT_COLUMNS = 'id, name, price, category, main_image, description, is_active, created_at, sizes, sub_images, brand, colors';
-const STORE_SETTINGS_COLUMNS = 'id, bank_name, account_number, depositor_name, shop_name, shop_name_kr, kakao_url, shipping_fee';
+const BASE_STORE_SETTINGS_COLUMNS = 'id, bank_name, account_number, depositor_name, shop_name, shop_name_kr, kakao_url, shipping_fee';
+// supabase/updates/01_batch1_settings.sql 로 추가된 칸
+const STORE_SETTINGS_COLUMNS = `${BASE_STORE_SETTINGS_COLUMNS}, community_url, biz_owner, biz_number, ecommerce_number, biz_email`;
+
+const DEFAULT_COMMUNITY_URL = 'https://open.kakao.com/o/g48GLFNi';
+const GRID_STORAGE_KEY = 'hm_grid_cols';
+
+// 클립보드 복사 (구형 브라우저/인앱 브라우저 대비 textarea 방식 fallback)
+const copyText = async (text: string) => {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+};
+
+// 썸네일용 옵션 요약: "크림, 블랙, 카키, 핑크" -> "크림, 블랙, 카키 외 1"
+const summarizeOptions = (str: string, max: number) => {
+  const list = (str || '').split(',').map(s => s.trim()).filter(Boolean);
+  return list.length > max ? `${list.slice(0, max).join(', ')} 외 ${list.length - max}` : list.join(', ');
+};
+
+// 카카오톡 말풍선 아이콘
+const KakaoIcon = ({ size = 20 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#191919" d="M12 3.5c-5.25 0-9.5 3.33-9.5 7.44 0 2.66 1.78 4.99 4.46 6.31l-.9 3.32c-.08.3.26.54.52.37l3.94-2.6c.48.05.97.08 1.48.08 5.25 0 9.5-3.33 9.5-7.48S17.25 3.5 12 3.5z" />
+  </svg>
+);
 
 const THEME = {
   primary: '#F06A7D',
@@ -34,11 +65,14 @@ export default function App() {
   const [categories, setCategories] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
   const [cart, setCart] = useState<any[]>([]);
+  const cartRef = useRef<any[]>([]);
+  cartRef.current = cart;
   const [currentView, setCurrentView] = useState('home'); 
 
   // --- 수파베이스 연동 설정 ---
   const [shopSettings, setShopSettings] = useState({
-    shop_name: 'Hoo & Moi', shop_name_kr: '후앤모아', kakao_url: 'https://open.kakao.com/o/sy8ZbjNi', shipping_fee: 3500
+    shop_name: 'Hoo & Moi', shop_name_kr: '후앤모아', kakao_url: 'https://open.kakao.com/o/sy8ZbjNi', shipping_fee: 3500,
+    community_url: DEFAULT_COMMUNITY_URL, biz_owner: '', biz_number: '', ecommerce_number: '', biz_email: ''
   });
   const [bankInfo, setBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
   const [editBankInfo, setEditBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
@@ -57,6 +91,26 @@ export default function App() {
   const [activeSmallCat, setActiveSmallCat] = useState('전체');
   const [currentPage, setCurrentPage] = useState(1);
   const productsPerPage = 20;
+
+  // --- 썸네일 배열 (2열 / 4열), 고른 배열은 브라우저에 기억 ---
+  const [gridCols, setGridCols] = useState<2 | 4>(() => {
+    try { return localStorage.getItem(GRID_STORAGE_KEY) === '4' ? 4 : 2; } catch (e) { return 2; }
+  });
+  const homePerPage = gridCols === 4 ? 40 : 20;
+  const toggleGridCols = () => {
+    const next = gridCols === 2 ? 4 : 2;
+    setGridCols(next); setCurrentPage(1);
+    try { localStorage.setItem(GRID_STORAGE_KEY, String(next)); } catch (e) {}
+  };
+  const productListRef = useRef<HTMLDivElement>(null);
+  const goHomePage = (page: number) => {
+    setCurrentPage(page);
+    if (productListRef.current) window.scrollTo({ top: productListRef.current.getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth' });
+  };
+
+  // --- 주문서 전송 안내창 ---
+  const [showOrderSentModal, setShowOrderSentModal] = useState(false);
+  const [orderCopyFailed, setOrderCopyFailed] = useState(false);
 
   // --- 공지사항, 배너, 메인 문구 ---
   const [notice, setNotice] = useState<any>(null);
@@ -94,6 +148,8 @@ export default function App() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [adminTab, setAdminTab] = useState('orders'); 
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
@@ -135,12 +191,65 @@ export default function App() {
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
+  // 🔙 뒤로가기: 화면 이동마다 브라우저 기록을 남겨서 휴대폰 뒤로가기·상단 < 버튼이
+  //    직전 화면으로 돌아가고, 홈으로 돌아오면 보던 위치(스크롤)를 그대로 복원
+  const homeScrollRef = useRef(0);
+  const navDepthRef = useRef(0);
+  const popNavRef = useRef(false);
+  const prevViewRef = useRef('home');
+  const currentViewRef = useRef(currentView);
+  currentViewRef.current = currentView;
+  const productsRef = useRef<any[]>([]);
+  productsRef.current = products;
+
+  useEffect(() => {
+    const onScroll = () => { if (currentViewRef.current === 'home') homeScrollRef.current = window.scrollY; };
+    const onPop = (e: PopStateEvent) => {
+      const state = e.state || {};
+      let view: string = state.hmView || 'home';
+      navDepthRef.current = typeof state.hmDepth === 'number' ? state.hmDepth : 0;
+      if (view === 'detail') {
+        const target = productsRef.current.find((p: any) => String(p.id) === String(state.productId));
+        if (target) { setSelectedProduct(target); setSelectedSize(''); setSelectedColor(''); setQuantity(1); }
+        else view = 'home';
+      }
+      // 주문이 끝난 뒤 뒤로가기로 주문서 화면에 돌아가지 않도록
+      if ((view === 'orderForm' || view === 'quotationPreview') && cartRef.current.length === 0) view = 'home';
+      popNavRef.current = true;
+      setCurrentView(view);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('popstate', onPop);
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('popstate', onPop); };
+  }, []);
+
+  useLayoutEffect(() => {
+    const prev = prevViewRef.current;
+    if (prev !== currentView) {
+      if (!popNavRef.current && currentView !== 'home') {
+        navDepthRef.current += 1;
+        const url = currentView === 'detail' && selectedProduct ? `${window.location.pathname}?productId=${selectedProduct.id}` : window.location.pathname;
+        window.history.pushState({ hmView: currentView, hmDepth: navDepthRef.current, productId: selectedProduct?.id }, '', url);
+      }
+      if (currentView === 'home') window.scrollTo(0, homeScrollRef.current);
+      else window.scrollTo(0, 0);
+    }
+    popNavRef.current = false;
+    prevViewRef.current = currentView;
+  }, [currentView]);
+
   const handleGoHome = () => {
+    if (currentView === 'home') { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    if (navDepthRef.current > 0) { window.history.go(-navDepthRef.current); return; }
     window.history.replaceState(null, '', window.location.pathname);
     setCurrentView('home');
   };
+  const handleBack = () => {
+    if (navDepthRef.current > 0) window.history.back();
+    else handleGoHome();
+  };
 
-  useEffect(() => { setCurrentPage(1); }, [activeBrand, activeLargeCat, activeSmallCat, searchQuery]);
+  useEffect(() => { setCurrentPage(1); homeScrollRef.current = 0; }, [activeBrand, activeLargeCat, activeSmallCat, searchQuery]);
   useEffect(() => { setAdminEditPage(1); }, [adminEditSearch, adminEditBrand, adminEditCategory]);
 
   useEffect(() => {
@@ -189,13 +298,19 @@ export default function App() {
 
   const fetchStoreSettings = async () => {
     try {
-      const { data } = await supabase.from('store_settings').select(STORE_SETTINGS_COLUMNS).order('id', { ascending: true }).limit(1);
+      const first = await supabase.from('store_settings').select(STORE_SETTINGS_COLUMNS).order('id', { ascending: true }).limit(1);
+      let data: any[] | null = first.data;
+      // 새 칸 SQL 실행 전이라면 기존 칸만으로 불러오기
+      if (first.error) data = (await supabase.from('store_settings').select(BASE_STORE_SETTINGS_COLUMNS).order('id', { ascending: true }).limit(1)).data;
       if (data && data.length > 0) {
         setBankInfo(data[0]); setEditBankInfo(data[0]);
         setShopSettings({
           shop_name: data[0].shop_name || 'Hoo & Moi', shop_name_kr: data[0].shop_name_kr || '후앤모아',
           kakao_url: data[0].kakao_url || 'https://open.kakao.com/o/sy8ZbjNi',
-          shipping_fee: data[0].shipping_fee !== undefined ? data[0].shipping_fee : 3500
+          shipping_fee: data[0].shipping_fee !== undefined ? data[0].shipping_fee : 3500,
+          community_url: data[0].community_url || DEFAULT_COMMUNITY_URL,
+          biz_owner: data[0].biz_owner || '', biz_number: data[0].biz_number || '',
+          ecommerce_number: data[0].ecommerce_number || '', biz_email: data[0].biz_email || ''
         });
       }
     } catch (err) {}
@@ -206,7 +321,9 @@ export default function App() {
       const updateData = {
         bank_name: editBankInfo.bank_name, account_number: editBankInfo.account_number, depositor_name: editBankInfo.depositor_name,
         shop_name: shopSettings.shop_name, shop_name_kr: shopSettings.shop_name_kr,
-        kakao_url: shopSettings.kakao_url, shipping_fee: shopSettings.shipping_fee
+        kakao_url: shopSettings.kakao_url, shipping_fee: shopSettings.shipping_fee,
+        community_url: shopSettings.community_url, biz_owner: shopSettings.biz_owner, biz_number: shopSettings.biz_number,
+        ecommerce_number: shopSettings.ecommerce_number, biz_email: shopSettings.biz_email
       };
 
       let response;
@@ -593,10 +710,20 @@ export default function App() {
   };
   const handleAdminLogin = async () => {
     if (!adminEmail || !adminPassword) return alert("이메일과 비밀번호를 입력해주세요.");
-    const { error } = await supabase.auth.signInWithPassword({ email: adminEmail.trim(), password: adminPassword });
-    if (error) return alert("로그인 실패: 이메일 또는 비밀번호를 확인해주세요.");
-    setAdminPassword('');
-    if (!(await enterAdmin())) alert("관리자로 등록되지 않은 계정입니다.");
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: adminEmail.trim(), password: adminPassword });
+      if (error) {
+        const code = (error as any).code || '';
+        if (code === 'invalid_credentials') return alert("로그인 실패: 비밀번호가 맞지 않거나 등록되지 않은 이메일입니다.\n\n👁 버튼으로 입력한 비밀번호를 확인해보세요. (브라우저가 예전 비밀번호를 자동으로 넣었을 수 있어요)");
+        if (code === 'email_not_confirmed') return alert("로그인 실패: 아직 메일 인증이 안 된 계정입니다.\nSupabase > Authentication > Users 에서 인증 상태를 확인해주세요.");
+        if (error.status === 429) return alert("로그인 시도가 너무 많습니다. 몇 분 뒤 다시 시도해주세요.");
+        return alert("로그인 실패: " + error.message);
+      }
+      setAdminPassword(''); setShowAdminPassword(false);
+      if (!(await enterAdmin())) alert("로그인은 됐지만 관리자로 등록되지 않은 계정입니다.\nadmin_users 목록에 이메일을 등록해주세요.");
+    } finally { setIsLoggingIn(false); }
   };
   const openAdmin = async () => {
     const { data } = await supabase.auth.getSession();
@@ -645,7 +772,6 @@ export default function App() {
     return { bg: THEME.primary, text: 'white' };
   };
   const openProductDetail = (p: any) => {
-    window.history.replaceState(null, '', `${window.location.pathname}?productId=${p.id}`);
     setSelectedProduct(p); setSelectedSize(''); setSelectedColor(''); setQuantity(1); setCurrentView('detail');
   };
 
@@ -662,8 +788,8 @@ export default function App() {
     return matchBrand && matchCategory && matchSearch;
   });
 
-  const totalPages = Math.max(1, Math.ceil(displayProducts.length / productsPerPage));
-  const currentProducts = displayProducts.slice((currentPage - 1) * productsPerPage, currentPage * productsPerPage);
+  const totalPages = Math.max(1, Math.ceil(displayProducts.length / homePerPage));
+  const currentProducts = displayProducts.slice((currentPage - 1) * homePerPage, currentPage * homePerPage);
 
   const adminDisplayProducts = products.filter(p => {
     const matchBrand = adminEditBrand === '전체' || p.brand === adminEditBrand;
@@ -699,6 +825,82 @@ export default function App() {
     );
   };
 
+  // 📨 주문서 전송하기: 주문정보 복사 → 안내창 → (안내창 버튼으로) 1:1 채팅 열기
+  const buildOrderSheet = (order: any) => [
+    `[${shopSettings.shop_name_kr} 입금확인요청]`,
+    `주문번호: ${order.order_number}`,
+    `성함: ${order.customer_name}`,
+    `연락처: ${order.phone}`,
+    `입금액: ${order.total_amount.toLocaleString()}원`,
+    `입금계좌: ${bankInfo.bank_name} ${bankInfo.account_number} (예금주 ${bankInfo.depositor_name})`
+  ].join('\n');
+  const handleSendOrderSheet = async () => {
+    const ok = await copyText(buildOrderSheet(currentOrder));
+    setOrderCopyFailed(!ok);
+    setShowOrderSentModal(true);
+  };
+  const handleCopyAccount = async () => {
+    const ok = await copyText(`${bankInfo.bank_name} ${bankInfo.account_number}`);
+    alert(ok ? "계좌번호가 복사되었습니다." : "복사에 실패했습니다. 계좌번호를 직접 입력해주세요.");
+  };
+
+  // 📄 페이지 번호: « 10페이지 이전 / ‹ 1페이지 이전 / 1~10 / › 1페이지 다음 / » 10페이지 다음
+  const renderPagination = (page: number, total: number, onChange: (p: number) => void, accent: string) => {
+    if (total <= 1) return null;
+    const blockStart = Math.floor((page - 1) / 10) * 10 + 1;
+    const blockEnd = Math.min(total, blockStart + 9);
+    const pages = Array.from({ length: blockEnd - blockStart + 1 }, (_, i) => blockStart + i);
+    const arrowBtn = (icon: React.ReactNode, target: number, disabled: boolean, label: string) => (
+      <button aria-label={label} onClick={() => !disabled && onChange(target)} disabled={disabled}
+        style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', color: disabled ? '#ccc' : THEME.text, cursor: disabled ? 'default' : 'pointer', flexShrink: 0, padding: 0 }}>{icon}</button>
+    );
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '2px', maxWidth: '420px', margin: '0 auto' }}>
+        {arrowBtn(<ChevronsLeft size={15} />, Math.max(1, page - 10), page === 1, '10페이지 이전')}
+        {arrowBtn(<ChevronLeft size={15} />, page - 1, page === 1, '이전 페이지')}
+        {pages.map(n => (
+          <button key={n} onClick={() => onChange(n)} style={{ flex: '0 1 30px', minWidth: 0, height: '28px', padding: 0, borderRadius: '14px', border: 'none', backgroundColor: n === page ? accent : 'transparent', color: n === page ? '#fff' : THEME.text, fontWeight: n === page ? 'bold' : 'normal', fontSize: '13px', cursor: 'pointer' }}>{n}</button>
+        ))}
+        {arrowBtn(<ChevronRight size={15} />, page + 1, page === total, '다음 페이지')}
+        {arrowBtn(<ChevronsRight size={15} />, Math.min(total, page + 10), page === total, '10페이지 다음')}
+      </div>
+    );
+  };
+
+  // 🏢 하단 사업자 정보 (전자상거래법 표시사항 + 결제 계좌)
+  const renderBusinessFooter = () => {
+    const bizDigits = (shopSettings.biz_number || '').replace(/[^0-9]/g, '');
+    const row = (label: string, value: React.ReactNode) => value ? (
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}><span style={{ color: '#aaa', minWidth: '96px', flexShrink: 0 }}>{label}</span><span style={{ color: '#666', wordBreak: 'break-all' }}>{value}</span></div>
+    ) : null;
+    return (
+      <footer style={{ backgroundColor: '#F4F2EF', padding: '28px 20px 40px', fontSize: '12px', lineHeight: '1.6', borderTop: `1px solid ${THEME.border}` }}>
+        <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, margin: '0 0 10px 0' }}>쇼핑몰 기본정보</p>
+        {row('상호명', shopSettings.shop_name_kr)}
+        {row('대표자', shopSettings.biz_owner)}
+        {row('사업자등록번호', shopSettings.biz_number && (
+          <>{shopSettings.biz_number}{bizDigits.length === 10 && <a href={`https://www.ftc.go.kr/bizCommPop.do?wrkr_no=${bizDigits}`} target="_blank" rel="noreferrer" style={{ marginLeft: '8px', color: THEME.text, textDecoration: 'underline' }}>사업자정보 확인</a>}</>
+        ))}
+        {row('통신판매업 신고', shopSettings.ecommerce_number)}
+        {row('이메일', shopSettings.biz_email && <a href={`mailto:${shopSettings.biz_email}`} style={{ color: '#666' }}>{shopSettings.biz_email}</a>)}
+        {shopSettings.kakao_url && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ color: '#aaa', minWidth: '96px', flexShrink: 0 }}>문의하기</span>
+            <a href={shopSettings.kakao_url} target="_blank" rel="noreferrer" aria-label="카카오톡 1:1 문의" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: '#FEE500', color: '#191919', padding: '5px 12px', borderRadius: '16px', fontWeight: 'bold', textDecoration: 'none' }}><KakaoIcon size={16} /> 카카오톡 문의</a>
+          </div>
+        )}
+        {(bankInfo.bank_name || bankInfo.account_number) && (
+          <>
+            <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, margin: '18px 0 10px 0' }}>결제정보</p>
+            {row('무통장 입금', `${bankInfo.bank_name} ${bankInfo.account_number}`)}
+            {row('예금주', bankInfo.depositor_name)}
+          </>
+        )}
+        <p style={{ color: '#bbb', margin: '18px 0 0 0' }}>© {shopSettings.shop_name}. All rights reserved.</p>
+      </footer>
+    );
+  };
+
   return (
     <div style={{ backgroundColor: THEME.bg, minHeight: '100vh', fontFamily: "'Pretendard', 'Noto Sans KR', sans-serif", paddingBottom: '110px', color: THEME.text }}>
       <style>{`
@@ -725,7 +927,7 @@ export default function App() {
 
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
         <div style={{ width: '80px', display: 'flex', alignItems: 'center' }}>
-           {currentView !== 'home' ? ( <ChevronLeft size={28} onClick={handleGoHome} style={{ cursor: 'pointer', color: THEME.text }}/>
+           {currentView !== 'home' ? ( <ChevronLeft size={28} onClick={handleBack} style={{ cursor: 'pointer', color: THEME.text }}/>
            ) : (
              <div onClick={handleInstallClick} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: THEME.primaryLight, padding: '6px 10px', borderRadius: '15px' }}>
                <Download size={14} color={THEME.primary} />
@@ -734,8 +936,13 @@ export default function App() {
            )}
         </div>
         <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '26px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer', flex: 1 }} onClick={handleGoHome}>{shopSettings.shop_name}</h1>
-        <div style={{ position: 'relative', cursor: 'pointer', width: '80px', display: 'flex', justifyContent: 'flex-end' }} onClick={() => setCurrentView('cart')}>
-          <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', width: '80px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '14px' }}>
+          {currentView === 'home' && (
+            <button onClick={toggleGridCols} aria-label={gridCols === 2 ? '4열로 보기' : '2열로 보기'} title={gridCols === 2 ? '4열로 보기' : '2열로 보기'} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', color: THEME.text }}>
+              {gridCols === 2 ? <Grid2x2 size={22} /> : <Grid3x3 size={22} />}
+            </button>
+          )}
+          <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setCurrentView('cart')}>
             <ShoppingBag size={24} color={THEME.text} />
             {cart.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', backgroundColor: THEME.primary, color: 'white', borderRadius: '50%', padding: '2px 6px', fontSize: '11px', fontWeight: 'bold' }}>{cart.length}</span>}
           </div>
@@ -779,24 +986,31 @@ export default function App() {
 
             {currentProducts.length > 0 ? (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginTop: '10px' }}>
+                <div ref={productListRef} style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, gap: gridCols === 4 ? '8px' : '15px', marginTop: '10px' }}>
                   {currentProducts.map((p) => (
-                    <div key={p.id} onClick={() => openProductDetail(p)} style={{ cursor: 'pointer' }}>
-                      <div style={{ position: 'relative', marginBottom: '12px' }}>
-                        <img src={p.main_image} style={{ width: '100%', borderRadius: '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee' }} />
-                        {isNewProduct(p.created_at) && <span style={{ position: 'absolute', top: '8px', left: '8px', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', boxShadow: '0 2px 5px rgba(240,106,125,0.3)' }}>✨ NEW</span>}
+                    <div key={p.id} onClick={() => openProductDetail(p)} style={{ cursor: 'pointer', minWidth: 0 }}>
+                      <div style={{ position: 'relative', marginBottom: gridCols === 4 ? '6px' : '12px' }}>
+                        <img src={p.main_image} loading="lazy" style={{ width: '100%', borderRadius: gridCols === 4 ? '8px' : '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee', display: 'block' }} />
+                        {isNewProduct(p.created_at) && (gridCols === 4
+                          ? <span style={{ position: 'absolute', top: '4px', left: '4px', backgroundColor: THEME.primary, color: 'white', padding: '1px 5px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold' }}>NEW</span>
+                          : <span style={{ position: 'absolute', top: '8px', left: '8px', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', boxShadow: '0 2px 5px rgba(240,106,125,0.3)' }}>✨ NEW</span>)}
                       </div>
-                      <p style={{ fontSize: '12px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 4px 0' }}>{p.brand || '자체제작'}</p>
-                      <h3 style={{ fontSize: '15px', margin: '0 0 6px 0', fontWeight: '500', color: THEME.text, lineHeight: '1.3' }}>{p.name}</h3>
-                      {p.sizes && <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 6px 0' }}>{p.sizes}</p>}
-                      <p style={{ fontSize: '17px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{p.price.toLocaleString()}원</p>
+                      {gridCols === 4 ? (
+                        <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{p.price.toLocaleString()}원</p>
+                      ) : (
+                        <>
+                          <p style={{ fontSize: '12px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 4px 0' }}>{p.brand || '자체제작'}</p>
+                          <h3 style={{ fontSize: '15px', margin: '0 0 6px 0', fontWeight: '500', color: THEME.text, lineHeight: '1.3' }}>{p.name}</h3>
+                          {p.sizes && <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 3px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📏 {summarizeOptions(p.sizes, 6)}</p>}
+                          {p.colors && <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 6px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎨 {summarizeOptions(p.colors, 3)}</p>}
+                          <p style={{ fontSize: '17px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{p.price.toLocaleString()}원</p>
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', marginTop: '40px', paddingBottom: '20px' }}>
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} style={{ padding: '8px 16px', borderRadius: '20px', border: `1px solid ${currentPage === 1 ? THEME.border : THEME.primary}`, backgroundColor: currentPage === 1 ? '#f9f9f9' : '#fff', color: currentPage === 1 ? '#ccc' : THEME.primary, fontWeight: 'bold', cursor: currentPage === 1 ? 'default' : 'pointer' }}>이전</button>
-                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.text }}>{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} style={{ padding: '8px 16px', borderRadius: '20px', border: `1px solid ${currentPage === totalPages ? THEME.border : THEME.primary}`, backgroundColor: currentPage === totalPages ? '#f9f9f9' : '#fff', color: currentPage === totalPages ? '#ccc' : THEME.primary, fontWeight: 'bold', cursor: currentPage === totalPages ? 'default' : 'pointer' }}>다음</button>
+                <div style={{ marginTop: '40px', paddingBottom: '20px' }}>
+                  {renderPagination(currentPage, totalPages, goHomePage, THEME.primary)}
                 </div>
               </>
             ) : (
@@ -1071,15 +1285,12 @@ export default function App() {
             <p style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 5px 0', color: THEME.text }}>{bankInfo.bank_name} {bankInfo.account_number}</p>
             <p style={{ fontSize: '14px', margin: 0, color: THEME.subText }}>예금주: {bankInfo.depositor_name}</p>
           </div>
-          <button onClick={() => {
-            alert("❗입금 완료 후 [주문번호, 주문자 정보, 연락처]를 1:1 채팅으로 보내주셔야 최종 주문이 완료됩니다.");
-            const text = `[${shopSettings.shop_name_kr} 입금확인 요청]\n주문번호: ${currentOrder.order_number}\n주문자: ${currentOrder.customer_name}\n연락처: ${currentOrder.phone}\n입금액: ${currentOrder.total_amount.toLocaleString()}원`;
-            try { navigator.clipboard.writeText(text); alert("요청 메시지가 복사되었습니다! 1:1 채팅창에 붙여넣어주세요."); } catch (e) { alert("복사에 실패했습니다."); }
-          }} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', marginBottom: '30px' }}>주문 견적서 복사하기</button>
+          <p style={{ fontSize: '13px', color: THEME.primary, fontWeight: 'bold', margin: '0 0 10px 0' }}>⬇️ 아래 버튼을 눌러 주문서를 꼭 보내주세요</p>
+          <button onClick={handleSendOrderSheet} style={{ width: '100%', padding: '18px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '17px', fontWeight: 'bold', marginBottom: '30px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', boxShadow: '0 4px 15px rgba(240,106,125,0.3)' }}><Send size={20} /> 주문서 전송하기</button>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '30px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => window.open(shopSettings.kakao_url, '_blank')}>
-              <div style={{ backgroundColor: '#333', padding: '15px', borderRadius: '50%' }}><Share size={20} color="#fff" /></div>
-              <span style={{ fontSize: '13px', color: THEME.text }}>1:1 채팅</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => window.open(shopSettings.community_url || DEFAULT_COMMUNITY_URL, '_blank')}>
+              <div style={{ backgroundColor: '#FEE500', padding: '15px', borderRadius: '50%' }}><Megaphone size={20} color="#191919" /></div>
+              <span style={{ fontSize: '13px', color: THEME.text }}>📢 신상 소식방</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => setCurrentView('lookup')}>
               <div style={{ backgroundColor: '#fff', border:`1px solid ${THEME.border}`, padding: '15px', borderRadius: '50%' }}><FileText size={20} color={THEME.text} /></div>
@@ -1090,6 +1301,44 @@ export default function App() {
               <span style={{ fontSize: '13px', color: THEME.text }}>홈으로 가기</span>
             </div>
           </div>
+
+          {showOrderSentModal && (
+            <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(2px)', padding: '16px', boxSizing: 'border-box' }}>
+              <div style={{ backgroundColor: '#fff', borderRadius: '24px', width: '100%', maxWidth: '380px', maxHeight: '90vh', overflowY: 'auto', textAlign: 'left', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+                <div style={{ backgroundColor: THEME.primaryLight, padding: '24px 20px 18px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '36px', lineHeight: 1, marginBottom: '10px' }}>🎀</div>
+                  <h3 style={{ fontSize: '19px', fontWeight: 'bold', color: THEME.primary, margin: 0 }}>{orderCopyFailed ? '주문서를 직접 보내주세요' : '주문서가 복사되었어요!'}</h3>
+                </div>
+                <div style={{ padding: '20px' }}>
+                  {orderCopyFailed && (
+                    <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '13px', backgroundColor: THEME.bg, padding: '12px', borderRadius: '10px', margin: '0 0 16px 0', userSelect: 'all' }}>{buildOrderSheet(currentOrder)}</pre>
+                  )}
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+                    <span style={{ flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
+                    <div>
+                      <p style={{ fontSize: '15px', fontWeight: 'bold', color: THEME.text, margin: '0 0 4px 0' }}>{shopSettings.shop_name_kr} 1:1 채팅방에 붙여넣고 전송</p>
+                      <p style={{ fontSize: '12px', color: THEME.subText, margin: 0 }}>{orderCopyFailed ? '위 내용을 꾹 눌러 복사한 뒤 보내주세요' : "입력칸을 꾹 누르면 '붙여넣기'가 나와요"}</p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '18px' }}>
+                    <span style={{ flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontSize: '15px', fontWeight: 'bold', color: THEME.text, margin: '0 0 8px 0' }}>아래 계좌로 입금</p>
+                      <div style={{ backgroundColor: THEME.bg, borderRadius: '12px', padding: '12px' }}>
+                        <p style={{ fontSize: '15px', fontWeight: 'bold', margin: '0 0 2px 0', color: THEME.text }}>{bankInfo.bank_name} {bankInfo.account_number}</p>
+                        <p style={{ fontSize: '13px', margin: '0 0 6px 0', color: THEME.subText }}>예금주 {bankInfo.depositor_name}</p>
+                        <p style={{ fontSize: '17px', fontWeight: 'bold', margin: '0 0 10px 0', color: THEME.primary }}>{currentOrder.total_amount.toLocaleString()}원</p>
+                        <button onClick={handleCopyAccount} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '14px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '12px', fontWeight: 'bold', color: THEME.text }}><Copy size={13} /> 계좌 복사</button>
+                      </div>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '14px', textAlign: 'center', color: THEME.text, fontWeight: 'bold', margin: '0 0 18px 0' }}>💛 입금 확인 후 주문 접수를 도와드릴게요!</p>
+                  <button onClick={() => window.open(shopSettings.kakao_url, '_blank')} style={{ width: '100%', padding: '16px', backgroundColor: '#FEE500', color: '#191919', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><KakaoIcon size={20} /> 1:1 채팅방 열기</button>
+                  <button onClick={() => setShowOrderSentModal(false)} style={{ width: '100%', padding: '12px', backgroundColor: 'transparent', color: THEME.subText, border: 'none', fontSize: '14px' }}>닫기</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1193,8 +1442,13 @@ export default function App() {
           <Lock size={50} color={THEME.primary} style={{ margin: '0 auto 20px auto' }} />
           <h3 style={{ fontSize: '22px', fontWeight: 'bold', marginBottom: '30px' }}>관리자 접속</h3>
           <input type="email" autoComplete="username" placeholder="관리자 이메일" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '10px', fontSize: '15px', textAlign: 'center' }} />
-          <input type="password" autoComplete="current-password" placeholder="비밀번호" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAdminLogin(); }} style={{ width: '100%', padding: '16px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '20px', fontSize: '15px', textAlign: 'center' }} />
-          <button onClick={handleAdminLogin} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontWeight: 'bold', fontSize: '16px' }}>접속하기</button>
+          <div style={{ position: 'relative', marginBottom: '20px' }}>
+            <input type={showAdminPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="비밀번호" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAdminLogin(); }} style={{ width: '100%', padding: '16px 48px', borderRadius: '12px', border: `1px solid ${THEME.border}`, fontSize: '15px', textAlign: 'center', boxSizing: 'border-box' }} />
+            <button type="button" onClick={() => setShowAdminPassword(v => !v)} aria-label={showAdminPassword ? '비밀번호 숨기기' : '비밀번호 보기'} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: '4px', cursor: 'pointer', color: THEME.subText, display: 'flex' }}>
+              {showAdminPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
+          </div>
+          <button onClick={handleAdminLogin} disabled={isLoggingIn} style={{ width: '100%', padding: '16px', backgroundColor: isLoggingIn ? '#ccc' : THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontWeight: 'bold', fontSize: '16px' }}>{isLoggingIn ? '확인 중...' : '접속하기'}</button>
         </div>
       )}
 
@@ -1445,10 +1699,8 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', marginTop: '30px' }}>
-                    <button onClick={() => setAdminEditPage(p => Math.max(1, p - 1))} disabled={adminEditPage === 1} style={{ padding: '8px 16px', borderRadius: '20px', border: `1px solid ${adminEditPage === 1 ? THEME.border : THEME.text}`, backgroundColor: adminEditPage === 1 ? '#f9f9f9' : '#fff', color: adminEditPage === 1 ? '#ccc' : THEME.text, fontWeight: 'bold', cursor: adminEditPage === 1 ? 'default' : 'pointer' }}>이전</button>
-                    <span style={{ fontSize: '14px', fontWeight: 'bold', color: THEME.text }}>{adminEditPage} / {adminTotalPages}</span>
-                    <button onClick={() => setAdminEditPage(p => Math.min(adminTotalPages, p + 1))} disabled={adminEditPage === adminTotalPages} style={{ padding: '8px 16px', borderRadius: '20px', border: `1px solid ${adminEditPage === adminTotalPages ? THEME.border : THEME.text}`, backgroundColor: adminEditPage === adminTotalPages ? '#f9f9f9' : '#fff', color: adminEditPage === adminTotalPages ? '#ccc' : THEME.text, fontWeight: 'bold', cursor: adminEditPage === adminTotalPages ? 'default' : 'pointer' }}>다음</button>
+                  <div style={{ marginTop: '30px' }}>
+                    {renderPagination(adminEditPage, adminTotalPages, (p) => { setAdminEditPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); }, THEME.text)}
                   </div>
                 </>
               ) : (
@@ -1559,8 +1811,18 @@ export default function App() {
                 <h3 style={{ fontSize: '18px', marginBottom: '15px', fontWeight: 'bold', color: THEME.text }}>⚙️ 쇼핑몰 기본 및 계좌 설정</h3>
                 <input placeholder="영문 상호 (예: Hoo & Moi)" value={shopSettings.shop_name} onChange={e => setShopSettings({...shopSettings, shop_name: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
                 <input placeholder="한글 상호 (예: 후앤모아)" value={shopSettings.shop_name_kr} onChange={e => setShopSettings({...shopSettings, shop_name_kr: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
-                <input placeholder="카카오톡 오픈채팅 주소" value={shopSettings.kakao_url} onChange={e => setShopSettings({...shopSettings, kakao_url: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
+                <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 4px 0' }}>1:1 채팅 주소 (주문서 전송·하단 문의하기)</p>
+                <input placeholder="카카오톡 1:1 오픈채팅 주소" value={shopSettings.kakao_url} onChange={e => setShopSettings({...shopSettings, kakao_url: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
+                <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 4px 0' }}>📢 신상 소식방 주소 (단체 오픈채팅)</p>
+                <input placeholder="신상 소식방 오픈채팅 주소" value={shopSettings.community_url} onChange={e => setShopSettings({...shopSettings, community_url: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
                 <input type="number" placeholder="기본 배송비 (예: 3500)" value={shopSettings.shipping_fee} onChange={e => setShopSettings({...shopSettings, shipping_fee: parseInt(e.target.value) || 0})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '20px' }} />
+
+                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>사업자 정보 (쇼핑몰 맨 아래 표시)</p>
+                <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 10px 0' }}>상호명은 위의 한글 상호, 문의하기는 1:1 채팅 주소가 표시됩니다.</p>
+                <input placeholder="대표자" value={shopSettings.biz_owner} onChange={e => setShopSettings({...shopSettings, biz_owner: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
+                <input placeholder="사업자등록번호 (예: 000-00-00000)" value={shopSettings.biz_number} onChange={e => setShopSettings({...shopSettings, biz_number: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
+                <input placeholder="통신판매업 신고번호" value={shopSettings.ecommerce_number} onChange={e => setShopSettings({...shopSettings, ecommerce_number: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
+                <input placeholder="이메일" value={shopSettings.biz_email} onChange={e => setShopSettings({...shopSettings, biz_email: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '20px' }} />
 
                 <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>무통장 입금 계좌</p>
                 <input placeholder="은행명 (예: 농협)" value={editBankInfo.bank_name} onChange={e => setEditBankInfo({...editBankInfo, bank_name: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}`, marginBottom: '10px' }} />
@@ -1573,6 +1835,8 @@ export default function App() {
           )}
         </div>
       )}
+
+      {currentView !== 'admin' && currentView !== 'adminLogin' && renderBusinessFooter()}
 
       {currentView !== 'detail' && currentView !== 'quotationPreview' && currentView !== 'orderComplete' && (
         <div style={{ position: 'fixed', bottom: 0, width: '100%', backgroundColor: '#fff', display: 'flex', borderTop: `1px solid ${THEME.border}`, paddingTop: '10px', paddingBottom: 'calc(env(safe-area-inset-bottom, 20px) + 15px)', zIndex: 100 }}>
