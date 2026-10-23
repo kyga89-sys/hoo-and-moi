@@ -12,7 +12,24 @@ const BASE_STORE_SETTINGS_COLUMNS = 'id, bank_name, account_number, depositor_na
 // supabase/updates/01_batch1_settings.sql 로 추가된 칸
 const BATCH1_STORE_SETTINGS_COLUMNS = `${BASE_STORE_SETTINGS_COLUMNS}, community_url, biz_owner, biz_number, ecommerce_number, biz_email`;
 // supabase/updates/02_home_layout.sql 로 추가된 칸 (홈 탭·브랜드 순서)
-const STORE_SETTINGS_COLUMNS = `${BATCH1_STORE_SETTINGS_COLUMNS}, home_layout`;
+const LAYOUT_STORE_SETTINGS_COLUMNS = `${BATCH1_STORE_SETTINGS_COLUMNS}, home_layout`;
+// supabase/updates/03_soldout_listprice.sql 로 추가된 칸 (정가 배율 %)
+const STORE_SETTINGS_COLUMNS = `${LAYOUT_STORE_SETTINGS_COLUMNS}, list_price_rate`;
+
+// 정가(삭선) 계산: 상품에 정가가 있으면 그 값, 비어 있으면 판매가 × (1 + 배율%) 을 보기 좋게 올림
+//   1만원 미만은 100원 단위, 이상은 1,000원 단위. 정가 0 또는 배율 0 이면 표시 안 함
+const getListPrice = (p: any, rate: number) => {
+  const price = Number(p?.price) || 0;
+  if (price <= 0) return 0;
+  if (p?.list_price === 0) return 0;
+  if (p?.list_price != null) return p.list_price > price ? p.list_price : 0;
+  if (!rate || rate <= 0) return 0;
+  const raw = price * (1 + rate / 100);
+  const unit = raw < 10000 ? 100 : 1000;
+  return Math.ceil(raw / unit) * unit;
+};
+const getDiscountRate = (price: number, listPrice: number) => listPrice > price ? Math.round((listPrice - price) / listPrice * 100) : 0;
+const isOptionSoldOut = (opt: string) => /품절/.test(opt || '');
 
 // 홈 노출 순서: 순서 미지정(새 상품)이 맨 앞 → 지정한 순서대로 → 같으면 최신순(불러온 순서 유지)
 const sortByDisplayOrder = (list: any[]) => list
@@ -103,6 +120,7 @@ function SortableList<T>({ items, keyOf, onChange, render, maxHeight }: {
 }
 
 const DEFAULT_COMMUNITY_URL = 'https://open.kakao.com/o/g48GLFNi';
+const DEFAULT_LIST_PRICE_RATE = 30; // 정가 배율 기본값 (도매몰 수집 기본 30%)
 const GRID_STORAGE_KEY = 'hm_grid_cols';
 
 // 클립보드 복사 (구형 브라우저/인앱 브라우저 대비 textarea 방식 fallback)
@@ -162,8 +180,10 @@ export default function App() {
   // --- 수파베이스 연동 설정 ---
   const [shopSettings, setShopSettings] = useState({
     shop_name: 'Hoo & Moi', shop_name_kr: '후앤모아', kakao_url: 'https://open.kakao.com/o/sy8ZbjNi', shipping_fee: 3500,
-    community_url: DEFAULT_COMMUNITY_URL, biz_owner: '', biz_number: '', ecommerce_number: '', biz_email: ''
+    community_url: DEFAULT_COMMUNITY_URL, biz_owner: '', biz_number: '', ecommerce_number: '', biz_email: '',
+    list_price_rate: DEFAULT_LIST_PRICE_RATE
   });
+  const [hasRateColumn, setHasRateColumn] = useState(false);
   const [bankInfo, setBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
   const [editBankInfo, setEditBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
 
@@ -240,6 +260,11 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  // 설정 > 관리자 계정: 비밀번호 변경
+  const [newPw, setNewPw] = useState('');
+  const [newPw2, setNewPw2] = useState('');
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [isChangingPw, setIsChangingPw] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [adminTab, setAdminTab] = useState('orders'); 
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
@@ -253,13 +278,17 @@ export default function App() {
   const [adminEditSearch, setAdminEditSearch] = useState('');
   const [adminEditBrand, setAdminEditBrand] = useState('전체');
   const [adminEditCategory, setAdminEditCategory] = useState('전체');
+  const [adminEditStatus, setAdminEditStatus] = useState('전체'); // 전체 / 판매중 / 품절
   const [adminEditPage, setAdminEditPage] = useState(1);
 
   // --- 상품 등록/수정 상태 ---
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [prodName, setProdName] = useState('');
   const [prodPrice, setProdPrice] = useState('');
-  const [prodCostPrice, setProdCostPrice] = useState(''); 
+  const [prodCostPrice, setProdCostPrice] = useState('');
+  // 정가: '' = 자동(설정 배율), '0' = 표시 안 함, 숫자 = 직접 지정
+  const [prodListPrice, setProdListPrice] = useState('');
+  const [prodSoldout, setProdSoldout] = useState(false);
   const [prodDesc, setProdDesc] = useState(''); 
   const [prodSizes, setProdSizes] = useState(''); 
   const [prodColors, setProdColors] = useState(''); 
@@ -352,7 +381,7 @@ export default function App() {
   };
 
   useEffect(() => { setCurrentPage(1); homeScrollRef.current = 0; }, [activeBrand, activeLargeCat, activeSmallCat, searchQuery]);
-  useEffect(() => { setAdminEditPage(1); }, [adminEditSearch, adminEditBrand, adminEditCategory]);
+  useEffect(() => { setAdminEditPage(1); }, [adminEditSearch, adminEditBrand, adminEditCategory, adminEditStatus]);
 
   useEffect(() => {
     fetchProducts(); fetchCategories(); fetchBrands(); fetchNoticesAndBanner(); fetchStoreSettings();
@@ -402,7 +431,7 @@ export default function App() {
     try {
       // 새 칸 SQL 실행 전이라면 있는 칸만으로 불러오기 (최신 → 1차 → 기본 순서로 시도)
       let data: any[] | null = null;
-      for (const cols of [STORE_SETTINGS_COLUMNS, BATCH1_STORE_SETTINGS_COLUMNS, BASE_STORE_SETTINGS_COLUMNS]) {
+      for (const cols of [STORE_SETTINGS_COLUMNS, LAYOUT_STORE_SETTINGS_COLUMNS, BATCH1_STORE_SETTINGS_COLUMNS, BASE_STORE_SETTINGS_COLUMNS]) {
         const res = await supabase.from('store_settings').select(cols).order('id', { ascending: true }).limit(1);
         if (!res.error) { data = res.data; break; }
       }
@@ -414,8 +443,10 @@ export default function App() {
           shipping_fee: data[0].shipping_fee !== undefined ? data[0].shipping_fee : 3500,
           community_url: data[0].community_url || DEFAULT_COMMUNITY_URL,
           biz_owner: data[0].biz_owner || '', biz_number: data[0].biz_number || '',
-          ecommerce_number: data[0].ecommerce_number || '', biz_email: data[0].biz_email || ''
+          ecommerce_number: data[0].ecommerce_number || '', biz_email: data[0].biz_email || '',
+          list_price_rate: typeof data[0].list_price_rate === 'number' ? data[0].list_price_rate : DEFAULT_LIST_PRICE_RATE
         });
+        setHasRateColumn('list_price_rate' in data[0]);
         setHomeLayout(data[0].home_layout && typeof data[0].home_layout === 'object' ? data[0].home_layout : {});
       }
     } catch (err) {}
@@ -428,7 +459,8 @@ export default function App() {
         shop_name: shopSettings.shop_name, shop_name_kr: shopSettings.shop_name_kr,
         kakao_url: shopSettings.kakao_url, shipping_fee: shopSettings.shipping_fee,
         community_url: shopSettings.community_url, biz_owner: shopSettings.biz_owner, biz_number: shopSettings.biz_number,
-        ecommerce_number: shopSettings.ecommerce_number, biz_email: shopSettings.biz_email
+        ecommerce_number: shopSettings.ecommerce_number, biz_email: shopSettings.biz_email,
+        ...(hasRateColumn ? { list_price_rate: Math.max(0, Math.min(100, shopSettings.list_price_rate || 0)) } : {})
       };
 
       let response;
@@ -473,18 +505,19 @@ export default function App() {
     let from = 0;
     const step = 1000;
     let fetchMore = true;
-    // 노출 순서 칸(display_order) SQL 실행 전이면 그 칸 없이 불러오기
-    let publicCols = `${PUBLIC_PRODUCT_COLUMNS}, display_order`;
+    // 새 칸 SQL 실행 전이면 있는 칸만으로 불러오기 (최신 → 노출순서 → 기본 순서로 시도)
+    const colCandidates = [`${PUBLIC_PRODUCT_COLUMNS}, display_order, is_soldout, list_price`, `${PUBLIC_PRODUCT_COLUMNS}, display_order`, PUBLIC_PRODUCT_COLUMNS];
+    let colIdx = 0;
 
     while (fetchMore) {
       let { data, error } = await supabase
         .from("products")
-        .select(withCost ? "*" : publicCols)
+        .select(withCost ? "*" : colCandidates[colIdx])
         .order("created_at", { ascending: false })
         .range(from, from + step - 1);
-      if (error && !withCost && publicCols !== PUBLIC_PRODUCT_COLUMNS) {
-        publicCols = PUBLIC_PRODUCT_COLUMNS;
-        ({ data, error } = await supabase.from("products").select(publicCols).order("created_at", { ascending: false }).range(from, from + step - 1));
+      while (error && !withCost && colIdx < colCandidates.length - 1) {
+        colIdx += 1;
+        ({ data, error } = await supabase.from("products").select(colCandidates[colIdx]).order("created_at", { ascending: false }).range(from, from + step - 1));
       }
 
       if (data && data.length > 0) {
@@ -749,6 +782,11 @@ export default function App() {
         }
       }
       const productData: any = { name: prodName, price: parseInt(prodPrice), cost_price: parseInt(prodCostPrice) || 0, category: prodCategory, brand: prodBrand, description: prodDesc, sizes: prodSizes, colors: prodColors };
+      // 품절·정가 칸은 SQL(03_soldout_listprice.sql) 실행 후에만 저장
+      if (hasProductExtraColumns) {
+        productData.is_soldout = prodSoldout;
+        productData.list_price = prodListPrice.trim() === '' ? null : (parseInt(prodListPrice) || 0);
+      }
       if (main_image) productData.main_image = main_image; 
       if (sub_images_array.length > 0) productData.sub_images = sub_images_array.join(',');
       if (editingProductId && sub_images_array.length === 0 && inputSubImageUrls === '') productData.sub_images = null;
@@ -759,8 +797,18 @@ export default function App() {
       resetProductForm(); await fetchProducts(); setAdminTab('productEdit');
     } catch (err: any) { alert("오류 발생: " + err.message); } finally { setIsUploading(false); }
   };
-  const resetProductForm = () => { setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setSubProdFiles(null); setInputSubImageUrls(''); setExistingMainImageUrl(''); setImportText(''); };
-  const openEditProduct = (p: any) => { setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setExistingMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd'); };
+  const resetProductForm = () => { setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdListPrice(''); setProdSoldout(false); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setSubProdFiles(null); setInputSubImageUrls(''); setExistingMainImageUrl(''); setImportText(''); };
+  const openEditProduct = (p: any) => { setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdListPrice(p.list_price == null ? '' : String(p.list_price)); setProdSoldout(!!p.is_soldout); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setExistingMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd'); };
+  // 품절 칸(SQL 03) 이 있는지: 관리자 화면은 전체 칸(*)을 불러오므로 첫 상품에 칸이 있으면 사용 가능
+  const hasProductExtraColumns = products.length > 0 && 'is_soldout' in products[0];
+  // 상품 관리 목록에서 품절 ↔ 판매중 바로 바꾸기
+  const toggleSoldout = async (p: any) => {
+    if (!hasProductExtraColumns) return alert("품절 기능을 쓰려면 supabase/updates/03_soldout_listprice.sql 을 먼저 실행해주세요.");
+    const next = !p.is_soldout;
+    const { error } = await supabase.from('products').update({ is_soldout: next }).eq('id', p.id);
+    if (error) return alert("변경 실패: " + error.message);
+    setProducts(prev => prev.map(x => x.id === p.id ? { ...x, is_soldout: next } : x));
+  };
   const deleteProduct = async (id: string) => { if (window.confirm("상품을 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); } };
 
   const getExtraPrice = (optStr: string) => {
@@ -773,6 +821,8 @@ export default function App() {
   };
 
   const addToCart = () => {
+    if (selectedProduct.is_soldout) return alert("품절된 상품입니다.");
+    if (isOptionSoldOut(selectedSize) || isOptionSoldOut(selectedColor)) return alert("선택한 옵션은 품절입니다. 다른 옵션을 골라주세요.");
     if (selectedProduct.sizes && !selectedSize)
       return alert("사이즈를 선택해주세요!");
     if (selectedProduct.colors && !selectedColor)
@@ -851,6 +901,8 @@ export default function App() {
     const { data: ok } = await supabase.rpc('is_admin');
     if (!ok) { await supabase.auth.signOut(); setIsAdmin(false); return false; }
     setIsAdmin(true);
+    const { data: u } = await supabase.auth.getUser();
+    if (u.user?.email) setAdminEmail(u.user.email);
     await Promise.all([fetchAdminOrders(), fetchProducts(true)]);
     setCurrentView('admin');
     return true;
@@ -876,6 +928,23 @@ export default function App() {
     const { data } = await supabase.auth.getSession();
     if (data.session && (await enterAdmin())) return;
     setCurrentView('adminLogin');
+  };
+  // 🔑 로그인한 관리자 본인의 비밀번호 변경 (Supabase 대시보드에 들어가지 않아도 됨)
+  const handleChangePassword = async () => {
+    if (newPw.length < 8) return alert("새 비밀번호는 8자 이상으로 입력해주세요.");
+    if (newPw !== newPw2) return alert("새 비밀번호와 확인이 서로 다릅니다.");
+    setIsChangingPw(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPw });
+      if (error) {
+        if ((error as any).code === 'same_password') return alert("지금 쓰는 비밀번호와 같습니다. 다른 비밀번호로 정해주세요.");
+        if ((error as any).code === 'weak_password') return alert("비밀번호가 너무 쉽습니다. 영문과 숫자를 섞어 더 길게 정해주세요.");
+        if ((error as any).code === 'reauthentication_needed') return alert("보안을 위해 로그아웃 후 다시 로그인한 뒤 바로 변경해주세요.");
+        return alert("변경 실패: " + error.message);
+      }
+      setNewPw(''); setNewPw2(''); setShowNewPw(false);
+      alert("비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요.");
+    } finally { setIsChangingPw(false); }
   };
   const handleAdminLogout = async () => {
     await supabase.auth.signOut();
@@ -922,7 +991,7 @@ export default function App() {
     setSelectedProduct(p); setSelectedSize(''); setSelectedColor(''); setQuantity(1); setCurrentView('detail');
   };
 
-  const displayProducts = products.filter(p => {
+  const displayProductsRaw = products.filter(p => {
     const matchBrand = activeBrand === '전체' || p.brand === activeBrand;
     let matchCategory = true;
     if (activeLargeCat !== '전체') {
@@ -934,6 +1003,8 @@ export default function App() {
     const matchSearch = !normalizedQuery || normalize(p.name).includes(normalizedQuery) || normalize(p.brand).includes(normalizedQuery);
     return matchBrand && matchCategory && matchSearch;
   });
+  // 품절 상품은 목록 맨 뒤로 (나머지 순서는 그대로)
+  const displayProducts = [...displayProductsRaw.filter(p => !p.is_soldout), ...displayProductsRaw.filter(p => p.is_soldout)];
 
   const totalPages = Math.max(1, Math.ceil(displayProducts.length / homePerPage));
   const currentProducts = displayProducts.slice((currentPage - 1) * homePerPage, currentPage * homePerPage);
@@ -943,7 +1014,8 @@ export default function App() {
     const matchCategory = adminEditCategory === '전체' || (p.category && p.category.startsWith(adminEditCategory));
     const normalize = (str: string) => (str || '').replace(/\s+/g, '').toLowerCase();
     const matchSearch = !adminEditSearch || normalize(p.name).includes(normalize(adminEditSearch)) || normalize(p.brand).includes(normalize(adminEditSearch));
-    return matchBrand && matchCategory && matchSearch;
+    const matchStatus = adminEditStatus === '전체' || (adminEditStatus === '품절' ? !!p.is_soldout : !p.is_soldout);
+    return matchBrand && matchCategory && matchSearch && matchStatus;
   });
   const adminTotalPages = Math.max(1, Math.ceil(adminDisplayProducts.length / productsPerPage));
   const adminCurrentProducts = adminDisplayProducts.slice((adminEditPage - 1) * productsPerPage, adminEditPage * productsPerPage);
@@ -1065,6 +1137,13 @@ export default function App() {
     </button>
   );
 
+  const optionBtnStyle = (active: boolean, soldout: boolean, padX: string): React.CSSProperties => ({
+    padding: `10px ${padX}`, borderRadius: '25px', fontSize: '14px', transition: '0.2s', cursor: soldout ? 'not-allowed' : 'pointer',
+    border: active ? `2px solid ${THEME.primary}` : `1px solid ${THEME.border}`,
+    backgroundColor: soldout ? '#f3f3f3' : active ? THEME.primaryLight : '#fff',
+    color: soldout ? '#bbb' : active ? THEME.primary : THEME.text,
+    fontWeight: active ? 'bold' : 'normal', textDecoration: soldout ? 'line-through' : 'none'
+  });
   const stepBadgeStyle: React.CSSProperties = { flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' };
   const smallActionStyle: React.CSSProperties = { flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', height: '30px', padding: '0 12px', borderRadius: '15px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '12px', fontWeight: 'bold', color: THEME.text, cursor: 'pointer', whiteSpace: 'nowrap' };
 
@@ -1233,18 +1312,31 @@ export default function App() {
                   {currentProducts.map((p) => {
                     const small = gridCols === 3;
                     const line = (fontSize: string, color: string, extra: React.CSSProperties = {}) => ({ fontSize, color, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, ...extra });
+                    const soldout = !!p.is_soldout;
+                    const listPrice = getListPrice(p, shopSettings.list_price_rate);
+                    const discount = getDiscountRate(p.price, listPrice);
                     return (
-                      <div key={p.id} onClick={() => openProductDetail(p)} style={{ cursor: 'pointer', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                      <div key={p.id} onClick={() => openProductDetail(p)} style={{ cursor: 'pointer', minWidth: 0, display: 'flex', flexDirection: 'column', opacity: soldout ? 0.75 : 1 }}>
                         <div style={{ position: 'relative', marginBottom: small ? '6px' : '10px' }}>
-                          <img src={p.main_image} loading="lazy" style={{ width: '100%', borderRadius: small ? '8px' : '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee', display: 'block' }} />
-                          {isNewProduct(p.created_at) && <span style={{ position: 'absolute', top: small ? '5px' : '8px', left: small ? '5px' : '8px', backgroundColor: THEME.primary, color: 'white', padding: small ? '2px 6px' : '3px 8px', borderRadius: '5px', fontSize: small ? '9px' : '10px', fontWeight: 'bold' }}>NEW</span>}
+                          <img src={p.main_image} loading="lazy" style={{ width: '100%', borderRadius: small ? '8px' : '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee', display: 'block', filter: soldout ? 'grayscale(0.6)' : 'none' }} />
+                          {!soldout && isNewProduct(p.created_at) && <span style={{ position: 'absolute', top: small ? '5px' : '8px', left: small ? '5px' : '8px', backgroundColor: THEME.primary, color: 'white', padding: small ? '2px 6px' : '3px 8px', borderRadius: '5px', fontSize: small ? '9px' : '10px', fontWeight: 'bold' }}>NEW</span>}
+                          {soldout && (
+                            <div style={{ position: 'absolute', inset: 0, borderRadius: small ? '8px' : '12px', backgroundColor: 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span style={{ backgroundColor: 'rgba(40,40,40,0.82)', color: '#fff', padding: small ? '4px 8px' : '6px 12px', borderRadius: '6px', fontSize: small ? '11px' : '13px', fontWeight: 'bold', letterSpacing: '1px' }}>SOLD OUT</span>
+                            </div>
+                          )}
                         </div>
                         <p style={line(small ? '11px' : '12px', THEME.primary, { fontWeight: 'bold', marginBottom: '2px' })}>{p.brand || '자체제작'}</p>
                         {/* 상품명 2줄 고정 → 한 줄에 있는 카드들의 높이가 같아짐 */}
                         <h3 style={{ fontSize: small ? '12px' : '14px', margin: '0 0 4px 0', fontWeight: 500, color: THEME.text, lineHeight: 1.35, height: small ? '32px' : '38px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, wordBreak: 'keep-all' }}>{p.name}</h3>
                         <p style={line(small ? '10.5px' : '12px', THEME.subText, { marginBottom: '1px' })}>{p.sizes ? summarizeOptions(p.sizes, small ? 4 : 6) : ' '}</p>
                         <p style={line(small ? '10.5px' : '12px', THEME.subText, { marginBottom: small ? '4px' : '6px' })}>{p.colors ? summarizeOptions(p.colors, small ? 2 : 3) : ' '}</p>
-                        <p style={{ fontSize: small ? '14px' : '16px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{p.price.toLocaleString()}원</p>
+                        {/* 정가 줄은 항상 같은 높이 → 정가 없는 상품도 카드 높이가 맞음 */}
+                        <p style={line(small ? '10.5px' : '12px', '#aaa', { textDecoration: discount ? 'line-through' : 'none', height: small ? '14px' : '16px' })}>{discount ? `${listPrice.toLocaleString()}원` : ' '}</p>
+                        <p style={{ fontSize: small ? '14px' : '16px', fontWeight: 'bold', color: THEME.text, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {discount > 0 && <span style={{ color: '#e53935', marginRight: small ? '3px' : '5px' }}>{discount}%</span>}
+                          {p.price.toLocaleString()}원
+                        </p>
                       </div>
                     );
                   })}
@@ -1315,7 +1407,20 @@ export default function App() {
               </button>
             </div>
             <p style={{ fontSize: '13px', color: THEME.subText, margin: '0 0 10px 0' }}>{selectedProduct.sizes}</p>
-            <p style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 30px 0' }}>{selectedProduct.price.toLocaleString()}원</p>
+            {(() => {
+              const lp = getListPrice(selectedProduct, shopSettings.list_price_rate);
+              const dc = getDiscountRate(selectedProduct.price, lp);
+              return (
+                <div style={{ margin: '0 0 24px 0' }}>
+                  {dc > 0 && <p style={{ fontSize: '14px', color: '#aaa', textDecoration: 'line-through', margin: '0 0 2px 0' }}>{lp.toLocaleString()}원</p>}
+                  <p style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>
+                    {dc > 0 && <span style={{ color: '#e53935', marginRight: '8px' }}>{dc}%</span>}
+                    {selectedProduct.price.toLocaleString()}원
+                  </p>
+                  {selectedProduct.is_soldout && <p style={{ display: 'inline-block', marginTop: '10px', padding: '6px 12px', borderRadius: '8px', backgroundColor: '#333', color: '#fff', fontSize: '13px', fontWeight: 'bold' }}>품절된 상품입니다</p>}
+                </div>
+              );
+            })()}
             <div style={{ height: '1px', backgroundColor: THEME.border, margin: '20px 0' }}></div>
 
             {selectedProduct.colors && (
@@ -1323,7 +1428,7 @@ export default function App() {
                 <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '12px' }}>색상</p>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   {selectedProduct.colors.split(',').map((c: string) => (
-                    <button key={c} onClick={() => setSelectedColor(c.trim())} style={{ padding: '10px 20px', borderRadius: '25px', border: selectedColor === c.trim() ? `2px solid ${THEME.primary}` : `1px solid ${THEME.border}`, backgroundColor: selectedColor === c.trim() ? THEME.primaryLight : '#fff', color: selectedColor === c.trim() ? THEME.primary : THEME.text, fontWeight: selectedColor === c.trim() ? 'bold' : 'normal', fontSize: '14px', transition: '0.2s' }}>{c.trim()}</button>
+                    <button key={c} disabled={isOptionSoldOut(c)} onClick={() => setSelectedColor(c.trim())} style={optionBtnStyle(selectedColor === c.trim(), isOptionSoldOut(c), '20px')}>{c.trim()}</button>
                   ))}
                 </div>
               </div>
@@ -1333,7 +1438,7 @@ export default function App() {
                 <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '12px' }}>사이즈</p>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   {selectedProduct.sizes.split(',').map((s: string) => (
-                    <button key={s} onClick={() => setSelectedSize(s.trim())} style={{ padding: '10px 24px', borderRadius: '25px', border: selectedSize === s.trim() ? `2px solid ${THEME.primary}` : `1px solid ${THEME.border}`, backgroundColor: selectedSize === s.trim() ? THEME.primaryLight : '#fff', color: selectedSize === s.trim() ? THEME.primary : THEME.text, fontWeight: selectedSize === s.trim() ? 'bold' : 'normal', fontSize: '14px', transition: '0.2s' }}>{s.trim()}</button>
+                    <button key={s} disabled={isOptionSoldOut(s)} onClick={() => setSelectedSize(s.trim())} style={optionBtnStyle(selectedSize === s.trim(), isOptionSoldOut(s), '24px')}>{s.trim()}</button>
                   ))}
                 </div>
               </div>
@@ -1365,8 +1470,8 @@ export default function App() {
           )}
 
           <div style={{ position: 'fixed', bottom: 0, width: '100%', padding: '15px 20px', backgroundColor: '#fff', borderTop: `1px solid ${THEME.border}`, zIndex: 100 }}>
-            <button onClick={addToCart} style={{ width: '100%', padding: '16px', backgroundColor: THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', boxShadow: '0 4px 15px rgba(240,106,125,0.2)' }}>
-               <ShoppingBag size={20} /> 담기
+            <button onClick={addToCart} disabled={!!selectedProduct.is_soldout} style={{ width: '100%', padding: '16px', backgroundColor: selectedProduct.is_soldout ? '#bbb' : THEME.primary, color: 'white', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', boxShadow: selectedProduct.is_soldout ? 'none' : '0 4px 15px rgba(240,106,125,0.2)', cursor: selectedProduct.is_soldout ? 'default' : 'pointer' }}>
+               {selectedProduct.is_soldout ? '품절된 상품입니다' : <><ShoppingBag size={20} /> 담기</>}
             </button>
           </div>
 
@@ -1867,6 +1972,18 @@ export default function App() {
                 {editingProductId && <button onClick={() => { resetProductForm(); setAdminTab('productEdit'); }} style={A.smallBtn('outline')}>목록으로</button>}
               </div>
 
+              {/* 판매 상태: 판매중 / 품절 */}
+              <div style={{ ...A.card, display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={A.cardTitle}>판매 상태</p>
+                  <p style={A.help}>품절로 바꾸면 손님 화면에 SOLD OUT 표시, 주문이 막히고 목록 맨 뒤로 갑니다. 사이즈별 품절은 옵션에 <strong>JL(품절)</strong>처럼 적으세요.</p>
+                </div>
+                <div style={{ display: 'flex', flexShrink: 0, border: `1px solid ${THEME.border}`, borderRadius: '10px', overflow: 'hidden' }}>
+                  <button onClick={() => setProdSoldout(false)} style={{ height: '38px', padding: '0 14px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: !prodSoldout ? '#2e7d32' : '#fff', color: !prodSoldout ? '#fff' : THEME.subText }}>판매중</button>
+                  <button onClick={() => setProdSoldout(true)} style={{ height: '38px', padding: '0 14px', border: 'none', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: prodSoldout ? '#333' : '#fff', color: prodSoldout ? '#fff' : THEME.subText }}>품절</button>
+                </div>
+              </div>
+
               {!editingProductId && (
                 <div style={{ ...A.card, backgroundColor: THEME.primaryLight, borderColor: THEME.primaryLight }}>
                   <p style={{ ...A.cardTitle, fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px', color: THEME.primary }}><Scissors size={16} /> 도매 상품 스마트 복붙</p>
@@ -1936,6 +2053,22 @@ export default function App() {
                     마진 {(Number(prodPrice) - Number(prodCostPrice)).toLocaleString()}원 ({Math.round((Number(prodPrice) - Number(prodCostPrice)) / Number(prodPrice) * 100)}%)
                   </p>
                 )}
+                {(() => {
+                  const autoLp = getListPrice({ price: Number(prodPrice) }, shopSettings.list_price_rate);
+                  const lp = getListPrice({ price: Number(prodPrice), list_price: prodListPrice.trim() === '' ? null : (parseInt(prodListPrice) || 0) }, shopSettings.list_price_rate);
+                  const dc = getDiscountRate(Number(prodPrice), lp);
+                  return (
+                    <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px dashed ${THEME.border}` }}>
+                      <label style={A.label}>정가 (삭선 표시) <span style={{ fontWeight: 'normal', color: THEME.subText }}>비우면 자동 · 0 = 표시 안 함</span></label>
+                      <input type="number" inputMode="numeric" placeholder={autoLp ? `자동: ${autoLp.toLocaleString()}원 (설정 ${shopSettings.list_price_rate}%)` : '자동 정가 꺼짐 (설정 0%)'} value={prodListPrice} onChange={e => setProdListPrice(e.target.value)} style={A.input} />
+                      {Number(prodPrice) > 0 && (
+                        <p style={{ ...A.help, marginTop: '8px' }}>
+                          손님 화면: {dc > 0 ? <><span style={{ textDecoration: 'line-through' }}>{lp.toLocaleString()}원</span> <strong style={{ color: '#e53935' }}>{dc}%</strong> <strong style={{ color: THEME.text }}>{Number(prodPrice).toLocaleString()}원</strong></> : <strong style={{ color: THEME.text }}>{Number(prodPrice).toLocaleString()}원 (정가 표시 없음)</strong>}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div style={A.card}>
@@ -1997,6 +2130,13 @@ export default function App() {
                     {homeMainCats.map(c => <option key={c} value={c}>{c} ({mainCatCounts[c]})</option>)}
                   </select>
                 </div>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                  {['전체', '판매중', '품절'].map(st => (
+                    <button key={st} onClick={() => setAdminEditStatus(st)} style={chipStyle(adminEditStatus === st, 'sub')}>
+                      {st} {st === '전체' ? products.length : st === '품절' ? products.filter(x => x.is_soldout).length : products.filter(x => !x.is_soldout).length}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 2px 10px', fontSize: '13px', color: THEME.subText }}>
                 <span>검색 결과 <strong style={{ color: THEME.text }}>{adminDisplayProducts.length.toLocaleString()}</strong>개</span>
@@ -2010,7 +2150,10 @@ export default function App() {
                       const margin = (p.price || 0) - (p.cost_price || 0);
                       return (
                         <div key={p.id} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px', borderTop: idx === 0 ? 'none' : `1px solid ${THEME.border}` }}>
-                          <img src={p.main_image} loading="lazy" style={{ width: '60px', height: '75px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0, backgroundColor: '#eee' }} />
+                          <div style={{ position: 'relative', flexShrink: 0 }}>
+                            <img src={p.main_image} loading="lazy" style={{ width: '60px', height: '75px', objectFit: 'cover', borderRadius: '8px', backgroundColor: '#eee', display: 'block', filter: p.is_soldout ? 'grayscale(1)' : 'none', opacity: p.is_soldout ? 0.6 : 1 }} />
+                            {p.is_soldout && <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, textAlign: 'center', backgroundColor: 'rgba(40,40,40,0.85)', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '0 0 8px 8px', padding: '2px 0' }}>품절</span>}
+                          </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <p style={{ fontSize: '11.5px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.brand || '자체제작'} <span style={{ color: THEME.subText, fontWeight: 'normal' }}>· {p.category || '분류 없음'}</span></p>
                             <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 4px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
@@ -2022,6 +2165,7 @@ export default function App() {
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0 }}>
                             <button onClick={() => openEditProduct(p)} style={A.smallBtn('dark')}><Edit size={13} /> 수정</button>
+                            <button onClick={() => toggleSoldout(p)} style={{ ...A.smallBtn('outline'), color: p.is_soldout ? '#2e7d32' : THEME.text }}>{p.is_soldout ? '판매 재개' : '품절'}</button>
                             <button onClick={() => deleteProduct(p.id)} style={A.smallBtn('danger')}><Trash2 size={13} /> 삭제</button>
                           </div>
                         </div>
@@ -2072,6 +2216,53 @@ export default function App() {
                       <div><label style={A.label}>이메일</label><input placeholder="이메일" value={shopSettings.biz_email} onChange={e => setShopSettings({...shopSettings, biz_email: e.target.value})} style={A.input} /></div>
                     </div>
                     <button onClick={saveStoreSettings} style={A.btn('dark')}>쇼핑몰 정보 저장</button>
+                  </div>
+                )}
+              </div>
+
+              {/* 💲 가격 표시: 정가(삭선) 배율 */}
+              <div style={A.card}>
+                {settingsHeader('price', '가격 표시 (정가 삭선)', `현재: 판매가보다 ${shopSettings.list_price_rate}% 높은 정가를 삭선으로 표시${shopSettings.list_price_rate ? '' : ' (꺼짐)'}`)}
+                {settingsOpen.price && (() => {
+                  const sample = 25000;
+                  const lp = getListPrice({ price: sample }, shopSettings.list_price_rate);
+                  const dc = getDiscountRate(sample, lp);
+                  return (
+                    <div style={{ marginTop: '16px' }}>
+                      <label style={A.label}>정가 배율 (%)</label>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                        <input type="number" inputMode="numeric" min={0} max={100} value={shopSettings.list_price_rate} onChange={e => setShopSettings({ ...shopSettings, list_price_rate: Math.max(0, Math.min(100, parseInt(e.target.value) || 0)) })} style={{ ...A.input, width: '110px' }} />
+                        {[0, 20, 25, 30].map(r => (
+                          <button key={r} onClick={() => setShopSettings({ ...shopSettings, list_price_rate: r })} style={chipStyle(shopSettings.list_price_rate === r, 'sub')}>{r === 0 ? '끄기' : `${r}%`}</button>
+                        ))}
+                      </div>
+                      <p style={{ ...A.help, margin: '0 0 6px 0' }}>예) 판매가 25,000원 → {dc > 0 ? <><span style={{ textDecoration: 'line-through' }}>{lp.toLocaleString()}원</span> <strong style={{ color: '#e53935' }}>{dc}%</strong> <strong>25,000원</strong></> : '정가 표시 없음'}</p>
+                      <p style={{ ...A.help, margin: '0 0 12px 0' }}>상품마다 정가를 직접 적으면 그 값이 우선입니다. (상품 등록 → 가격 → 정가) 도매몰 수집 상품도 이 배율이 적용됩니다.<br />※ 실제로 판매한 적 없는 가격을 정가로 크게 부풀리면 표시광고법 문제가 될 수 있어요.</p>
+                      {!hasRateColumn && <p style={{ ...A.help, margin: '0 0 10px 0', color: '#c62828' }}>저장하려면 supabase/updates/03_soldout_listprice.sql 을 먼저 실행해주세요.</p>}
+                      <button onClick={saveStoreSettings} disabled={!hasRateColumn} style={{ ...A.btn('dark'), opacity: hasRateColumn ? 1 : 0.4 }}>배율 저장</button>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* 🔑 관리자 계정: 비밀번호 변경 */}
+              <div style={A.card}>
+                {settingsHeader('account', '관리자 계정', `로그인 비밀번호 변경${adminEmail ? ` · ${adminEmail}` : ''}`)}
+                {settingsOpen.account && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={A.field}>
+                      <label style={A.label}>새 비밀번호 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(8자 이상)</span></label>
+                      <input type={showNewPw ? 'text' : 'password'} autoComplete="new-password" value={newPw} onChange={e => setNewPw(e.target.value)} style={A.input} />
+                    </div>
+                    <div style={A.field}>
+                      <label style={A.label}>새 비밀번호 확인</label>
+                      <input type={showNewPw ? 'text' : 'password'} autoComplete="new-password" value={newPw2} onChange={e => setNewPw2(e.target.value)} style={A.input} />
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: THEME.subText, marginBottom: '12px', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={showNewPw} onChange={e => setShowNewPw(e.target.checked)} /> 입력한 비밀번호 보기
+                    </label>
+                    <button onClick={handleChangePassword} disabled={isChangingPw} style={A.btn('dark')}>{isChangingPw ? '변경 중...' : '비밀번호 변경'}</button>
+                    <p style={{ ...A.help, marginTop: '8px' }}>바꾼 뒤에는 브라우저에 저장된 예전 비밀번호도 새 비밀번호로 바꿔주세요.</p>
                   </div>
                 )}
               </div>
