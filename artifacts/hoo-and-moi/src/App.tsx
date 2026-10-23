@@ -89,16 +89,17 @@ export default function App() {
   const [activeBrand, setActiveBrand] = useState('전체');
   const [activeLargeCat, setActiveLargeCat] = useState('전체');
   const [activeSmallCat, setActiveSmallCat] = useState('전체');
+  const [brandTabOpen, setBrandTabOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const productsPerPage = 20;
 
-  // --- 썸네일 배열 (2열 / 4열), 고른 배열은 브라우저에 기억 ---
-  const [gridCols, setGridCols] = useState<2 | 4>(() => {
-    try { return localStorage.getItem(GRID_STORAGE_KEY) === '4' ? 4 : 2; } catch (e) { return 2; }
+  // --- 썸네일 배열 (2열 / 3열), 고른 배열은 브라우저에 기억 ---
+  const [gridCols, setGridCols] = useState<2 | 3>(() => {
+    try { const v = localStorage.getItem(GRID_STORAGE_KEY); return v === '3' || v === '4' ? 3 : 2; } catch (e) { return 2; }
   });
-  const homePerPage = gridCols === 4 ? 40 : 20;
+  const homePerPage = gridCols === 3 ? 30 : 20;
   const toggleGridCols = () => {
-    const next = gridCols === 2 ? 4 : 2;
+    const next = gridCols === 2 ? 3 : 2;
     setGridCols(next); setCurrentPage(1);
     try { localStorage.setItem(GRID_STORAGE_KEY, String(next)); } catch (e) {}
   };
@@ -110,7 +111,6 @@ export default function App() {
 
   // --- 주문서 전송 안내창 ---
   const [showOrderSentModal, setShowOrderSentModal] = useState(false);
-  const [orderCopyFailed, setOrderCopyFailed] = useState(false);
 
   // --- 공지사항, 배너, 메인 문구 ---
   const [notice, setNotice] = useState<any>(null);
@@ -185,6 +185,7 @@ export default function App() {
 
   // --- 카테고리/브랜드 관리 상태 ---
   const [newBrand, setNewBrand] = useState('');
+  const [brandSearch, setBrandSearch] = useState('');
   const [adminCatExpanded, setAdminCatExpanded] = useState<Record<string, boolean>>({});
   const [newMainCat, setNewMainCat] = useState('');
   const [newSubCats, setNewSubCats] = useState<Record<string, string>>({});
@@ -419,6 +420,41 @@ export default function App() {
     return tree;
   };
   const categoryTree = getCombinedCategories();
+
+  // 🏷️ 홈 탭: 상품이 있는 분류만, 정해진 순서대로 (기타는 맨 뒤)
+  const MAIN_CAT_ORDER = ['아우터', '탑', '바지', '하의', '원피스', '스커트', '상하 세트', '홈웨어', '베이비', '한복', '수영복', '슈즈', '악세사리'];
+  const catRank = (name: string) => name === '기타' ? 999 : (MAIN_CAT_ORDER.indexOf(name) === -1 ? 500 : MAIN_CAT_ORDER.indexOf(name));
+  const mainCatCounts: Record<string, number> = {};
+  const subCatCounts: Record<string, number> = {};
+  const brandCounts: Record<string, number> = {};
+  products.forEach(p => {
+    const [main, ...rest] = (p.category || '').split('>').map((s: string) => s.trim());
+    if (main) mainCatCounts[main] = (mainCatCounts[main] || 0) + 1;
+    if (main && rest.length) { const key = `${main} > ${rest.join(' > ')}`; subCatCounts[key] = (subCatCounts[key] || 0) + 1; }
+    if (p.brand) brandCounts[p.brand] = (brandCounts[p.brand] || 0) + 1;
+  });
+  const homeMainCats = Object.keys(mainCatCounts).sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'ko'));
+  const homeSubCats = activeLargeCat === '전체' ? [] : Object.keys(subCatCounts)
+    .filter(k => k.startsWith(`${activeLargeCat} > `)).map(k => k.slice(activeLargeCat.length + 3)).sort((a, b) => a.localeCompare(b, 'ko'));
+  const homeBrands = Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko'));
+
+  const showBrandRow = brandTabOpen || activeBrand !== '전체';
+  const isBrandTab = showBrandRow;
+  const isAllTab = !showBrandRow && activeLargeCat === '전체';
+  const selectAllTab = () => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat('전체'); setActiveSmallCat('전체'); };
+  const selectBrandTab = () => { setBrandTabOpen(true); setActiveLargeCat('전체'); setActiveSmallCat('전체'); };
+  const selectMainCat = (main: string) => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat(main); setActiveSmallCat('전체'); };
+
+  // 탭 버튼 모양 통일: main = 1단(채움), sub = 2단(테두리)
+  const chipStyle = (active: boolean, level: 'main' | 'sub'): React.CSSProperties => level === 'main' ? {
+    flexShrink: 0, height: '34px', padding: '0 14px', borderRadius: '17px', fontSize: '13.5px', whiteSpace: 'nowrap', cursor: 'pointer',
+    fontWeight: active ? 'bold' : 500, border: `1px solid ${active ? THEME.primary : THEME.border}`,
+    backgroundColor: active ? THEME.primary : '#fff', color: active ? '#fff' : THEME.text
+  } : {
+    flexShrink: 0, height: '30px', padding: '0 12px', borderRadius: '15px', fontSize: '12.5px', whiteSpace: 'nowrap', cursor: 'pointer',
+    fontWeight: active ? 'bold' : 'normal', border: `1px solid ${active ? THEME.primary : THEME.border}`,
+    backgroundColor: active ? THEME.primaryLight : '#fff', color: active ? THEME.primary : THEME.subText
+  };
 
   const getBrandCount = (brandName: string) => products.filter(p => p.brand === brandName).length;
   const getLargeCatCount = (catName: string) => products.filter(p => p.category && p.category.startsWith(catName)).length;
@@ -834,15 +870,23 @@ export default function App() {
     `입금액: ${order.total_amount.toLocaleString()}원`,
     `입금계좌: ${bankInfo.bank_name} ${bankInfo.account_number} (예금주 ${bankInfo.depositor_name})`
   ].join('\n');
-  const handleSendOrderSheet = async () => {
-    const ok = await copyText(buildOrderSheet(currentOrder));
-    setOrderCopyFailed(!ok);
-    setShowOrderSentModal(true);
-  };
+  // 안내창 순서: ① 입금(계좌 복사) → ② 입금 후 주문서 복사 + 1:1 채팅
+  const handleSendOrderSheet = () => { copyText(buildOrderSheet(currentOrder)); setShowOrderSentModal(true); };
   const handleCopyAccount = async () => {
     const ok = await copyText(`${bankInfo.bank_name} ${bankInfo.account_number}`);
-    alert(ok ? "계좌번호가 복사되었습니다." : "복사에 실패했습니다. 계좌번호를 직접 입력해주세요.");
+    alert(ok ? "계좌번호가 복사되었습니다.\n입금 후 ② 주문서 전송을 꼭 해주세요!" : "복사에 실패했습니다. 계좌번호를 직접 입력해주세요.");
   };
+  const handleCopyOrderSheet = async () => {
+    const ok = await copyText(buildOrderSheet(currentOrder));
+    alert(ok ? "주문서가 복사되었습니다.\n1:1 채팅방에 붙여넣어 보내주세요." : "복사에 실패했습니다. 주문서 내용을 꾹 눌러 직접 복사해주세요.");
+  };
+  // 계좌를 먼저 복사했어도 채팅방을 열 때 주문서로 다시 복사 (팝업 차단을 피하려고 기다리지 않고 바로 열기)
+  const handleOpenChatWithSheet = () => {
+    copyText(buildOrderSheet(currentOrder));
+    window.open(shopSettings.kakao_url, '_blank');
+  };
+  const stepBadgeStyle: React.CSSProperties = { flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+  const smallActionStyle: React.CSSProperties = { flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', height: '30px', padding: '0 12px', borderRadius: '15px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '12px', fontWeight: 'bold', color: THEME.text, cursor: 'pointer', whiteSpace: 'nowrap' };
 
   // 📄 페이지 번호: « 10페이지 이전 / ‹ 1페이지 이전 / 1~10 / › 1페이지 다음 / » 10페이지 다음
   const renderPagination = (page: number, total: number, onChange: (p: number) => void, accent: string) => {
@@ -907,6 +951,7 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&display=swap');
         @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
         * { font-family: 'Pretendard', sans-serif; letter-spacing: -0.3px; }
+        *, *::before, *::after { box-sizing: border-box; }
         .serif-text { font-family: 'Noto Serif KR', serif !important; }
         input, textarea, button, select { outline: none; }
         input:focus, textarea:focus { border-color: ${THEME.primary} !important; }
@@ -925,27 +970,29 @@ export default function App() {
         </div>
       )}
 
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
-        <div style={{ width: '80px', display: 'flex', alignItems: 'center' }}>
-           {currentView !== 'home' ? ( <ChevronLeft size={28} onClick={handleBack} style={{ cursor: 'pointer', color: THEME.text }}/>
+      {/* 머리글: 좌우 칸 너비를 같게(84px) 해서 상호가 정확히 가운데 */}
+      <header style={{ display: 'grid', gridTemplateColumns: '84px 1fr 84px', alignItems: 'center', height: '60px', padding: '0 16px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+           {currentView !== 'home' ? (
+             <button onClick={handleBack} aria-label="뒤로가기" style={{ background: 'none', border: 'none', padding: '4px', marginLeft: '-6px', cursor: 'pointer', display: 'flex', color: THEME.text }}><ChevronLeft size={26} /></button>
            ) : (
-             <div onClick={handleInstallClick} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: THEME.primaryLight, padding: '6px 10px', borderRadius: '15px' }}>
-               <Download size={14} color={THEME.primary} />
+             <button onClick={handleInstallClick} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: THEME.primaryLight, padding: '6px 10px', borderRadius: '15px', border: 'none' }}>
+               <Download size={13} color={THEME.primary} />
                <span style={{fontSize: '12px', color: THEME.primary, fontWeight: 'bold', whiteSpace: 'nowrap'}}>앱 다운</span>
-             </div>
+             </button>
            )}
         </div>
-        <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '26px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer', flex: 1 }} onClick={handleGoHome}>{shopSettings.shop_name}</h1>
-        <div style={{ position: 'relative', width: '80px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '14px' }}>
+        <h1 className="serif-text" style={{ color: THEME.brown, fontSize: '23px', fontWeight: '700', margin: 0, textAlign: 'center', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={handleGoHome}>{shopSettings.shop_name}</h1>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '16px' }}>
           {currentView === 'home' && (
-            <button onClick={toggleGridCols} aria-label={gridCols === 2 ? '4열로 보기' : '2열로 보기'} title={gridCols === 2 ? '4열로 보기' : '2열로 보기'} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', color: THEME.text }}>
+            <button onClick={toggleGridCols} aria-label={gridCols === 2 ? '3열로 보기' : '2열로 보기'} title={gridCols === 2 ? '3열로 보기' : '2열로 보기'} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', color: THEME.text }}>
               {gridCols === 2 ? <Grid2x2 size={22} /> : <Grid3x3 size={22} />}
             </button>
           )}
-          <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setCurrentView('cart')}>
-            <ShoppingBag size={24} color={THEME.text} />
-            {cart.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', backgroundColor: THEME.primary, color: 'white', borderRadius: '50%', padding: '2px 6px', fontSize: '11px', fontWeight: 'bold' }}>{cart.length}</span>}
-          </div>
+          <button onClick={() => setCurrentView('cart')} aria-label="장바구니" style={{ position: 'relative', background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', color: THEME.text }}>
+            <ShoppingBag size={23} />
+            {cart.length > 0 && <span style={{ position: 'absolute', top: '-6px', right: '-8px', backgroundColor: THEME.primary, color: 'white', borderRadius: '10px', minWidth: '18px', height: '18px', lineHeight: '18px', textAlign: 'center', fontSize: '11px', fontWeight: 'bold' }}>{cart.length}</span>}
+          </button>
         </div>
       </header>
 
@@ -964,50 +1011,63 @@ export default function App() {
                ) : ( <div style={{ padding: '40px 20px', textAlign: 'center', backgroundColor: '#f9f9f9', color: THEME.subText, fontSize: '13px' }}>관리자 탭에서 메인 배너를 등록해주세요.</div> )}
             </div>
 
-            <div style={{ position: 'relative', marginBottom: '20px' }}>
-              <input placeholder="상품명, 브랜드 검색" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ width: '100%', padding: '14px 15px 14px 40px', borderRadius: '25px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }} />
-              <Search size={18} color={THEME.subText} style={{ position: 'absolute', left: '15px', top: '14px' }} />
+            <div style={{ position: 'relative', marginBottom: '16px' }}>
+              <input placeholder="상품명, 브랜드 검색" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ width: '100%', height: '46px', padding: '0 40px 0 42px', borderRadius: '23px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }} />
+              <Search size={18} color={THEME.subText} style={{ position: 'absolute', left: '16px', top: '14px' }} />
+              {searchQuery && <button onClick={() => setSearchQuery('')} aria-label="검색어 지우기" style={{ position: 'absolute', right: '12px', top: '11px', background: 'none', border: 'none', padding: '2px', cursor: 'pointer', color: THEME.subText, display: 'flex' }}><X size={18} /></button>}
             </div>
 
-            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '10px', scrollbarWidth: 'none' }}>
-              <button onClick={() => { setActiveLargeCat('전체'); setActiveSmallCat('전체'); }} style={{ padding: '8px 18px', borderRadius: '20px', fontSize: '14px', fontWeight: activeLargeCat === '전체' ? 'bold' : 'normal', border: activeLargeCat === '전체' ? 'none' : `1px solid ${THEME.border}`, backgroundColor: activeLargeCat === '전체' ? THEME.primary : '#fff', color: activeLargeCat === '전체' ? 'white' : THEME.text, whiteSpace: 'nowrap', transition: '0.2s' }}>전체</button>
-              {Object.keys(categoryTree).map(main => (
-                <button key={main} onClick={() => { setActiveLargeCat(main); setActiveSmallCat('전체'); }} style={{ padding: '8px 18px', borderRadius: '20px', fontSize: '14px', fontWeight: activeLargeCat === main ? 'bold' : 'normal', border: activeLargeCat === main ? 'none' : `1px solid ${THEME.border}`, backgroundColor: activeLargeCat === main ? THEME.primary : '#fff', color: activeLargeCat === main ? 'white' : THEME.text, whiteSpace: 'nowrap', transition: '0.2s' }}>{main}</button>
+            {/* 1단 탭: 전체 | 브랜드 | 대분류 (상품이 있는 분류만) */}
+            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -20px', padding: '0 20px 10px' }}>
+              <button onClick={selectAllTab} style={chipStyle(isAllTab, 'main')}>전체</button>
+              <button onClick={selectBrandTab} style={chipStyle(isBrandTab, 'main')}>브랜드</button>
+              {homeMainCats.map(main => (
+                <button key={main} onClick={() => selectMainCat(main)} style={chipStyle(activeLargeCat === main, 'main')}>{main}</button>
               ))}
             </div>
-            {activeLargeCat !== '전체' && categoryTree[activeLargeCat] && categoryTree[activeLargeCat].length > 0 && (
-              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '20px', scrollbarWidth: 'none' }}>
-                <button onClick={() => setActiveSmallCat('전체')} style={{ padding: '6px 14px', borderRadius: '15px', fontSize: '13px', fontWeight: activeSmallCat === '전체' ? 'bold' : 'normal', border: `1px solid ${activeSmallCat === '전체' ? THEME.primary : THEME.border}`, backgroundColor: activeSmallCat === '전체' ? THEME.primaryLight : '#fff', color: activeSmallCat === '전체' ? THEME.primary : THEME.subText, whiteSpace: 'nowrap' }}>전체보기</button>
-                {categoryTree[activeLargeCat].map((sub: string) => (
-                  <button key={sub} onClick={() => setActiveSmallCat(sub)} style={{ padding: '6px 14px', borderRadius: '15px', fontSize: '13px', fontWeight: activeSmallCat === sub ? 'bold' : 'normal', border: `1px solid ${activeSmallCat === sub ? THEME.primary : THEME.border}`, backgroundColor: activeSmallCat === sub ? THEME.primaryLight : '#fff', color: activeSmallCat === sub ? THEME.primary : THEME.subText, whiteSpace: 'nowrap' }}>{sub}</button>
+            {/* 2단: 브랜드 목록 또는 중분류 */}
+            {showBrandRow ? (
+              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -20px', padding: '2px 20px 10px' }}>
+                <button onClick={() => setActiveBrand('전체')} style={chipStyle(activeBrand === '전체', 'sub')}>모든 브랜드</button>
+                {homeBrands.map(b => (
+                  <button key={b.name} onClick={() => setActiveBrand(b.name)} style={chipStyle(activeBrand === b.name, 'sub')}>{b.name} <span style={{ opacity: 0.6 }}>{b.count}</span></button>
                 ))}
               </div>
-            )}
+            ) : activeLargeCat !== '전체' && homeSubCats.length > 0 ? (
+              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -20px', padding: '2px 20px 10px' }}>
+                <button onClick={() => setActiveSmallCat('전체')} style={chipStyle(activeSmallCat === '전체', 'sub')}>{activeLargeCat} 전체</button>
+                {homeSubCats.map(sub => (
+                  <button key={sub} onClick={() => setActiveSmallCat(sub)} style={chipStyle(activeSmallCat === sub, 'sub')}>{sub}</button>
+                ))}
+              </div>
+            ) : null}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '6px 0 12px', fontSize: '13px', color: THEME.subText }}>
+              <span>총 <strong style={{ color: THEME.text }}>{displayProducts.length.toLocaleString()}</strong>개</span>
+              <span>{currentPage} / {totalPages} 페이지</span>
+            </div>
 
             {currentProducts.length > 0 ? (
               <>
-                <div ref={productListRef} style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, gap: gridCols === 4 ? '8px' : '15px', marginTop: '10px' }}>
-                  {currentProducts.map((p) => (
-                    <div key={p.id} onClick={() => openProductDetail(p)} style={{ cursor: 'pointer', minWidth: 0 }}>
-                      <div style={{ position: 'relative', marginBottom: gridCols === 4 ? '6px' : '12px' }}>
-                        <img src={p.main_image} loading="lazy" style={{ width: '100%', borderRadius: gridCols === 4 ? '8px' : '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee', display: 'block' }} />
-                        {isNewProduct(p.created_at) && (gridCols === 4
-                          ? <span style={{ position: 'absolute', top: '4px', left: '4px', backgroundColor: THEME.primary, color: 'white', padding: '1px 5px', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold' }}>NEW</span>
-                          : <span style={{ position: 'absolute', top: '8px', left: '8px', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 'bold', boxShadow: '0 2px 5px rgba(240,106,125,0.3)' }}>✨ NEW</span>)}
+                <div ref={productListRef} style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, columnGap: gridCols === 3 ? '8px' : '12px', rowGap: gridCols === 3 ? '18px' : '24px' }}>
+                  {currentProducts.map((p) => {
+                    const small = gridCols === 3;
+                    const line = (fontSize: string, color: string, extra: React.CSSProperties = {}) => ({ fontSize, color, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, ...extra });
+                    return (
+                      <div key={p.id} onClick={() => openProductDetail(p)} style={{ cursor: 'pointer', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ position: 'relative', marginBottom: small ? '6px' : '10px' }}>
+                          <img src={p.main_image} loading="lazy" style={{ width: '100%', borderRadius: small ? '8px' : '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee', display: 'block' }} />
+                          {isNewProduct(p.created_at) && <span style={{ position: 'absolute', top: small ? '5px' : '8px', left: small ? '5px' : '8px', backgroundColor: THEME.primary, color: 'white', padding: small ? '2px 6px' : '3px 8px', borderRadius: '5px', fontSize: small ? '9px' : '10px', fontWeight: 'bold' }}>NEW</span>}
+                        </div>
+                        <p style={line(small ? '11px' : '12px', THEME.primary, { fontWeight: 'bold', marginBottom: '2px' })}>{p.brand || '자체제작'}</p>
+                        {/* 상품명 2줄 고정 → 한 줄에 있는 카드들의 높이가 같아짐 */}
+                        <h3 style={{ fontSize: small ? '12px' : '14px', margin: '0 0 4px 0', fontWeight: 500, color: THEME.text, lineHeight: 1.35, height: small ? '32px' : '38px', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, wordBreak: 'keep-all' }}>{p.name}</h3>
+                        <p style={line(small ? '10.5px' : '12px', THEME.subText, { marginBottom: '1px' })}>{p.sizes ? summarizeOptions(p.sizes, small ? 4 : 6) : ' '}</p>
+                        <p style={line(small ? '10.5px' : '12px', THEME.subText, { marginBottom: small ? '4px' : '6px' })}>{p.colors ? summarizeOptions(p.colors, small ? 2 : 3) : ' '}</p>
+                        <p style={{ fontSize: small ? '14px' : '16px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{p.price.toLocaleString()}원</p>
                       </div>
-                      {gridCols === 4 ? (
-                        <p style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{p.price.toLocaleString()}원</p>
-                      ) : (
-                        <>
-                          <p style={{ fontSize: '12px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 4px 0' }}>{p.brand || '자체제작'}</p>
-                          <h3 style={{ fontSize: '15px', margin: '0 0 6px 0', fontWeight: '500', color: THEME.text, lineHeight: '1.3' }}>{p.name}</h3>
-                          {p.sizes && <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 3px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📏 {summarizeOptions(p.sizes, 6)}</p>}
-                          {p.colors && <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 6px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎨 {summarizeOptions(p.colors, 3)}</p>}
-                          <p style={{ fontSize: '17px', fontWeight: 'bold', color: THEME.text, margin: 0 }}>{p.price.toLocaleString()}원</p>
-                        </>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div style={{ marginTop: '40px', paddingBottom: '20px' }}>
                   {renderPagination(currentPage, totalPages, goHomePage, THEME.primary)}
@@ -1305,36 +1365,40 @@ export default function App() {
           {showOrderSentModal && (
             <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(2px)', padding: '16px', boxSizing: 'border-box' }}>
               <div style={{ backgroundColor: '#fff', borderRadius: '24px', width: '100%', maxWidth: '380px', maxHeight: '90vh', overflowY: 'auto', textAlign: 'left', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
-                <div style={{ backgroundColor: THEME.primaryLight, padding: '24px 20px 18px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '36px', lineHeight: 1, marginBottom: '10px' }}>🎀</div>
-                  <h3 style={{ fontSize: '19px', fontWeight: 'bold', color: THEME.primary, margin: 0 }}>{orderCopyFailed ? '주문서를 직접 보내주세요' : '주문서가 복사되었어요!'}</h3>
+                <div style={{ backgroundColor: THEME.primaryLight, padding: '22px 20px 16px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '32px', lineHeight: 1, marginBottom: '8px' }}>🎀</div>
+                  <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 4px 0' }}>주문이 접수되었어요!</h3>
+                  <p style={{ fontSize: '13px', color: THEME.text, margin: 0 }}>아래 <strong>두 단계</strong>만 마치면 주문이 확정돼요</p>
                 </div>
                 <div style={{ padding: '20px' }}>
-                  {orderCopyFailed && (
-                    <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '13px', backgroundColor: THEME.bg, padding: '12px', borderRadius: '10px', margin: '0 0 16px 0', userSelect: 'all' }}>{buildOrderSheet(currentOrder)}</pre>
-                  )}
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-                    <span style={{ flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
-                    <div>
-                      <p style={{ fontSize: '15px', fontWeight: 'bold', color: THEME.text, margin: '0 0 4px 0' }}>{shopSettings.shop_name_kr} 1:1 채팅방에 붙여넣고 전송</p>
-                      <p style={{ fontSize: '12px', color: THEME.subText, margin: 0 }}>{orderCopyFailed ? '위 내용을 꾹 눌러 복사한 뒤 보내주세요' : "입력칸을 꾹 누르면 '붙여넣기'가 나와요"}</p>
-                    </div>
-                  </div>
+                  {/* ① 입금 */}
                   <div style={{ display: 'flex', gap: '10px', marginBottom: '18px' }}>
-                    <span style={{ flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
-                    <div style={{ flex: 1 }}>
-                      <p style={{ fontSize: '15px', fontWeight: 'bold', color: THEME.text, margin: '0 0 8px 0' }}>아래 계좌로 입금</p>
-                      <div style={{ backgroundColor: THEME.bg, borderRadius: '12px', padding: '12px' }}>
-                        <p style={{ fontSize: '15px', fontWeight: 'bold', margin: '0 0 2px 0', color: THEME.text }}>{bankInfo.bank_name} {bankInfo.account_number}</p>
-                        <p style={{ fontSize: '13px', margin: '0 0 6px 0', color: THEME.subText }}>예금주 {bankInfo.depositor_name}</p>
-                        <p style={{ fontSize: '17px', fontWeight: 'bold', margin: '0 0 10px 0', color: THEME.primary }}>{currentOrder.total_amount.toLocaleString()}원</p>
-                        <button onClick={handleCopyAccount} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '14px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '12px', fontWeight: 'bold', color: THEME.text }}><Copy size={13} /> 계좌 복사</button>
+                    <span style={stepBadgeStyle}>1</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: '15px', fontWeight: 'bold', color: THEME.text, margin: '2px 0 8px 0' }}>아래 계좌로 입금해주세요</p>
+                      <div style={{ backgroundColor: THEME.bg, borderRadius: '12px', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: '14.5px', fontWeight: 'bold', margin: '0 0 2px 0', color: THEME.text, wordBreak: 'break-all' }}>{bankInfo.bank_name} {bankInfo.account_number}</p>
+                          <p style={{ fontSize: '12.5px', margin: '0 0 4px 0', color: THEME.subText }}>예금주 {bankInfo.depositor_name}</p>
+                          <p style={{ fontSize: '17px', fontWeight: 'bold', margin: 0, color: THEME.primary }}>{currentOrder.total_amount.toLocaleString()}원</p>
+                        </div>
+                        <button onClick={handleCopyAccount} style={smallActionStyle}><Copy size={13} /> 계좌 복사</button>
                       </div>
                     </div>
                   </div>
-                  <p style={{ fontSize: '14px', textAlign: 'center', color: THEME.text, fontWeight: 'bold', margin: '0 0 18px 0' }}>💛 입금 확인 후 주문 접수를 도와드릴게요!</p>
-                  <button onClick={() => window.open(shopSettings.kakao_url, '_blank')} style={{ width: '100%', padding: '16px', backgroundColor: '#FEE500', color: '#191919', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '10px' }}><KakaoIcon size={20} /> 1:1 채팅방 열기</button>
-                  <button onClick={() => setShowOrderSentModal(false)} style={{ width: '100%', padding: '12px', backgroundColor: 'transparent', color: THEME.subText, border: 'none', fontSize: '14px' }}>닫기</button>
+                  {/* ② 입금 후 주문서 전송 */}
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '18px' }}>
+                    <span style={stepBadgeStyle}>2</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: '15px', fontWeight: 'bold', color: THEME.text, margin: '2px 0 2px 0' }}>입금 후 1:1 채팅으로 주문서 전송</p>
+                      <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 8px 0' }}>채팅방 입력칸을 꾹 눌러 '붙여넣기' 하면 아래 내용이 들어가요</p>
+                      <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '12.5px', lineHeight: 1.6, color: THEME.text, backgroundColor: THEME.bg, padding: '12px 14px', borderRadius: '12px', margin: '0 0 8px 0', userSelect: 'all' }}>{buildOrderSheet(currentOrder)}</pre>
+                      <button onClick={handleCopyOrderSheet} style={smallActionStyle}><Copy size={13} /> 주문서 복사</button>
+                    </div>
+                  </div>
+                  <button onClick={handleOpenChatWithSheet} style={{ width: '100%', padding: '16px', backgroundColor: '#FEE500', color: '#191919', border: 'none', borderRadius: '30px', fontSize: '16px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '6px', cursor: 'pointer' }}><KakaoIcon size={20} /> 주문서 복사하고 1:1 채팅방 열기</button>
+                  <p style={{ fontSize: '12.5px', textAlign: 'center', color: THEME.subText, margin: '8px 0 6px 0' }}>💛 입금 확인 후 주문 접수를 도와드릴게요</p>
+                  <button onClick={() => setShowOrderSentModal(false)} style={{ width: '100%', padding: '10px', backgroundColor: 'transparent', color: THEME.subText, border: 'none', fontSize: '14px', cursor: 'pointer' }}>닫기</button>
                 </div>
               </div>
             </div>
@@ -1752,16 +1816,29 @@ export default function App() {
               </div>
 
               <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
-                <h3 style={{ fontSize: '18px', marginBottom: '20px', fontWeight: 'bold', color: THEME.text }}>브랜드 관리</h3>
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-                  <input placeholder="새 브랜드명" value={newBrand} onChange={e => setNewBrand(e.target.value)} style={{ flex: 1, minWidth: 0, padding: '12px', borderRadius: '10px', border: `1px solid ${THEME.border}` }} />
-                  <button onClick={addBrand} style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 20px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none' }}>추가</button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
+                  <h3 style={{ fontSize: '18px', margin: 0, fontWeight: 'bold', color: THEME.text }}>브랜드 관리</h3>
+                  <span style={{ fontSize: '13px', color: THEME.subText }}>총 {brands.length}개</span>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {(brands || []).map(b => (
-                    <span key={b.id} style={{ padding: '8px 14px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '20px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {b.name} <Trash2 size={16} color="#c62828" style={{ cursor: 'pointer' }} onClick={() => deleteBrand(b.id)} />
-                    </span>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                  <input placeholder="새 브랜드명" value={newBrand} onChange={e => setNewBrand(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addBrand(); }} style={{ flex: 1, minWidth: 0, height: '44px', padding: '0 12px', borderRadius: '10px', border: `1px solid ${THEME.border}` }} />
+                  <button onClick={addBrand} style={{ flexShrink: 0, height: '44px', padding: '0 18px', backgroundColor: THEME.text, color: 'white', borderRadius: '10px', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>추가</button>
+                </div>
+                <div style={{ position: 'relative', marginBottom: '12px' }}>
+                  <input placeholder="브랜드 검색" value={brandSearch} onChange={e => setBrandSearch(e.target.value)} style={{ width: '100%', height: '40px', padding: '0 12px 0 34px', borderRadius: '10px', border: `1px solid ${THEME.border}`, backgroundColor: THEME.bg, fontSize: '13px' }} />
+                  <Search size={15} color={THEME.subText} style={{ position: 'absolute', left: '12px', top: '12px' }} />
+                </div>
+                {/* 상품 많은 순 → 이름순, 2열 표 형태 */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', maxHeight: '360px', overflowY: 'auto' }}>
+                  {[...(brands || [])]
+                    .filter(b => !brandSearch || b.name.toLowerCase().includes(brandSearch.trim().toLowerCase()))
+                    .sort((a, b) => (brandCounts[b.name] || 0) - (brandCounts[a.name] || 0) || a.name.localeCompare(b.name, 'ko'))
+                    .map(b => (
+                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px', padding: '0 8px 0 12px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '10px', minWidth: 0 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: '13.5px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
+                      <span style={{ flexShrink: 0, fontSize: '12px', color: THEME.subText }}>{brandCounts[b.name] || 0}개</span>
+                      <button onClick={() => deleteBrand(b.id)} aria-label={`${b.name} 삭제`} style={{ flexShrink: 0, background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button>
+                    </div>
                   ))}
                 </div>
               </div>
