@@ -166,6 +166,29 @@ const ORDERS_SEEN_KEY = 'hm_admin_orders_seen';
 // 손님 화면 상품 목록 저장 (다음 방문 때 바로 표시, 원가는 저장하지 않음)
 const PRODUCTS_CACHE_KEY = 'hm_products_cache_v1';
 const KAKAO_STATE_KEY = 'hm_kakao_state';
+// 📥 기린컴퍼니 수집함 (등록 전까지 이 브라우저에 보관)
+const COLLECT_BOX_KEY = 'hm_collect_box_v1';
+const COLLECT_ORIGIN_RE = /^https:\/\/(www\.)?gi-rin\.com$|^https:\/\/gilgilaa\.cafe24\.com$/;
+// 수집기에서 온 값만 골라 담기 (모양·길이 확인)
+const cleanCollected = (it: any) => {
+  const str = (v: any, n: number) => (typeof v === 'string' ? v : '').trim().slice(0, n);
+  const url = (v: any) => (typeof v === 'string' && /^https:\/\//.test(v) ? v.slice(0, 500) : '');
+  const int = (v: any) => (Number.isFinite(Number(v)) ? Math.max(0, Math.round(Number(v))) : 0);
+  return {
+    source_id: str(it.source_id, 40), source_url: url(it.source_url),
+    brand: str(it.brand, 40) || '자체제작', name: str(it.name, 100), raw_name: str(it.raw_name, 200),
+    consumer_price: int(it.consumer_price), cost_price: int(it.cost_price),
+    colors: str(it.colors, 600), sizes: str(it.sizes, 600),
+    main_image: url(it.main_image), sub_images: (Array.isArray(it.sub_images) ? it.sub_images : []).map(url).filter(Boolean).slice(0, 30),
+    soldout: !!it.soldout, collected_at: str(it.collected_at, 40)
+  };
+};
+// 판매가 정하기: 소비자가 그대로 / 원가 × 배율% (100원 단위 올림)
+const collectPrice = (it: any, rule: 'consumer' | 'rate', rate: number) => {
+  const up100 = (n: number) => Math.ceil(n / 100) * 100;
+  if (rule === 'consumer' && it.consumer_price > 0) return it.consumer_price;
+  return up100((it.cost_price || 0) * (rule === 'rate' ? rate : 160) / 100);
+};
 
 // 클립보드 복사 (구형 브라우저/인앱 브라우저 대비 textarea 방식 fallback)
 const copyText = async (text: string) => {
@@ -312,6 +335,14 @@ export default function App() {
   const [catSearch, setCatSearch] = useState('');
   const [catLimit, setCatLimit] = useState(50);
   const [isSavingCats, setIsSavingCats] = useState(false);
+  // 📥 수집함 · 💾 저장 공간
+  const [collectBox, setCollectBox] = useState<any[]>(() => { try { const v = JSON.parse(localStorage.getItem(COLLECT_BOX_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } });
+  const [collectPicked, setCollectPicked] = useState<Record<string, boolean>>({});
+  const [collectRule, setCollectRule] = useState<'consumer' | 'rate'>('consumer');
+  const [collectRate, setCollectRate] = useState(160);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [storageUsage, setStorageUsage] = useState<any>(null);
+  const bookmarkletRef = useRef<HTMLAnchorElement>(null);
   const [bankInfo, setBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
   const [editBankInfo, setEditBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
 
@@ -1207,6 +1238,98 @@ export default function App() {
     })();
   }, []);
   useEffect(() => { if (currentView === 'admin' && adminTab === 'settings' && !kakaoStatus && !kakaoStatusError) fetchKakaoStatus(); }, [currentView, adminTab]);
+
+  // 📥 기린컴퍼니 수집기 ↔ 관리자 창 (수집기가 이 창을 열고 상품을 보내옴, 관리자 로그인 상태에서만 받음)
+  const isAdminRef = useRef(false);
+  isAdminRef.current = isAdmin;
+  useEffect(() => { try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); } catch (e) {} }, [collectBox]);
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (!COLLECT_ORIGIN_RE.test(e.origin) || !e.data || typeof e.data !== 'object') return;
+      const src = e.source as Window | null;
+      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && src) src.postMessage({ type: 'hm-collector-ready' }, e.origin); return; }
+      if (e.data.type === 'hm-collector-items' && Array.isArray(e.data.items) && isAdminRef.current) {
+        const items = e.data.items.map(cleanCollected).filter((it: any) => /^girin:\d+$/.test(it.source_id) && it.name && it.main_image);
+        setCollectBox(prev => {
+          const map = new Map(prev.map((x: any) => [x.source_id, x]));
+          items.forEach((it: any) => map.set(it.source_id, { ...(map.get(it.source_id) || {}), ...it }));
+          return Array.from(map.values());
+        });
+        setAdminTab('collect');
+        if (src) src.postMessage({ type: 'hm-collector-ack', count: items.length }, e.origin);
+      }
+    };
+    window.addEventListener('message', onMsg);
+    if (new URLSearchParams(window.location.search).get('collect') === '1') {
+      window.history.replaceState(null, '', window.location.pathname);
+      setAdminTab('collect');
+      setTimeout(() => { openAdmin(); }, 200);
+    }
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+  const bookmarkletCode = `javascript:(function(){var s=document.createElement('script');s.src='${SHOP.siteUrl}/girin-collector.js?v='+Date.now();document.body.appendChild(s);})();`;
+  // React 는 javascript: 주소를 막기 때문에 직접 넣기 (즐겨찾기로 끌어다 놓는 버튼)
+  useEffect(() => { if (bookmarkletRef.current) bookmarkletRef.current.setAttribute('href', bookmarkletCode); });
+
+  const fetchStorageUsage = async () => {
+    const { data, error } = await supabase.rpc('admin_storage_usage');
+    setStorageUsage(error ? { error: /admin_storage_usage|function/i.test(error.message) ? 'SQL 07 실행 전' : error.message } : data);
+  };
+  useEffect(() => { if (currentView === 'admin' && ['collect', 'settings', 'productAdd'].includes(adminTab) && !storageUsage) fetchStorageUsage(); }, [currentView, adminTab]);
+  // 앞으로 몇 개 더 등록 가능한지 (무료 한도의 90%까지 · 수집 상품은 사진을 기린 서버에서 불러와 DB 만 사용)
+  const usageInfo = (() => {
+    const u = storageUsage;
+    if (!u || u.error) return null;
+    const perDb = Math.max(4000, u.products ? u.products_bytes / u.products : 4000);
+    const dbLeft = Math.max(0, u.db_limit * 0.9 - u.db_bytes);
+    const stLeft = Math.max(0, u.storage_limit * 0.9 - u.storage_bytes);
+    const perPhotoProduct = Math.max(60000, (u.photo_avg_bytes || 120000) * 3); // 대표 1 + 상세 2장 기준
+    const collectMore = Math.floor(dbLeft / perDb);
+    return {
+      collectMore, uploadMore: Math.min(collectMore, Math.floor(stLeft / perPhotoProduct)),
+      dbPct: Math.round(u.db_bytes / u.db_limit * 100), stPct: Math.round(u.storage_bytes / u.storage_limit * 100),
+      mb: (b: number) => (b / 1024 / 1024).toFixed(b < 100 * 1024 * 1024 ? 1 : 0)
+    };
+  })();
+  const usageLine = usageInfo
+    ? `💾 앞으로 약 ${usageInfo.collectMore.toLocaleString()}개 더 등록 가능 (기린 수집 기준) · 사진 직접 올리는 상품은 약 ${usageInfo.uploadMore.toLocaleString()}개`
+    : storageUsage?.error ? `💾 저장 공간: ${storageUsage.error}` : '💾 저장 공간 확인 중...';
+
+  const hasSourceColumn = products.length > 0 && 'source_id' in products[0];
+  const existingSourceIds = new Set(products.map((p: any) => p.source_id).filter(Boolean));
+  const registerCollected = async (ids: string[]) => {
+    if (!hasSourceColumn) return alert("먼저 supabase/updates/07_collector_storage.sql 을 실행해주세요. (같은 상품 두 번 등록 막기)");
+    const list = collectBox.filter((it: any) => ids.includes(it.source_id) && !existingSourceIds.has(it.source_id));
+    if (!list.length) return alert("등록할 상품이 없습니다. (이미 등록된 상품은 건너뜁니다)");
+    if (usageInfo && list.length > usageInfo.collectMore) return alert(`저장 공간이 부족합니다. 지금은 약 ${usageInfo.collectMore}개까지 더 등록할 수 있어요.`);
+    if (!window.confirm(`${list.length}개 상품을 등록할까요?`)) return;
+    setIsRegistering(true);
+    try {
+      const newBrands = Array.from(new Set(list.map((it: any) => it.brand))).filter(b => b && !brands.some((x: any) => x.name === b));
+      if (newBrands.length) await supabase.from('brands').insert(newBrands.map(name => ({ name })));
+      const rows = list.map((it: any) => {
+        const cat = it.category2 || suggestNewCategory({ name: it.name, category: '' }).category2 || '';
+        const row: any = {
+          name: it.name, price: it.price || collectPrice(it, collectRule, collectRate), cost_price: it.cost_price,
+          main_image: it.main_image, sub_images: (it.sub_images || []).join(','), sizes: it.sizes, colors: it.colors,
+          brand: it.brand, description: '', category: cat, source_id: it.source_id
+        };
+        if (hasProductExtraColumns) row.is_soldout = !!it.soldout;
+        if (hasCategory2Column) { row.category2 = cat || null; row.tags = []; }
+        return row;
+      });
+      for (let i = 0; i < rows.length; i += 50) {
+        const { error } = await supabase.from('products').insert(rows.slice(i, i + 50));
+        if (error) throw error;
+      }
+      const done = new Set(list.map((it: any) => it.source_id));
+      setCollectBox(prev => prev.filter((it: any) => !done.has(it.source_id)));
+      setCollectPicked({});
+      await Promise.all([fetchProducts(true), fetchBrands(), fetchStorageUsage()]);
+      alert(`${rows.length}개 상품을 등록했습니다. 홈 화면 맨 앞에 보입니다.`);
+    } catch (e: any) { alert("등록 실패: " + e.message); } finally { setIsRegistering(false); }
+  };
+  const updateCollected = (id: string, patch: any) => setCollectBox(prev => prev.map((it: any) => it.source_id === id ? { ...it, ...patch } : it));
 
   const handleAdminLogout = async () => {
     await supabase.auth.signOut();
@@ -2145,12 +2268,13 @@ export default function App() {
             <button onClick={handleAdminLogout} style={A.smallBtn('danger')}>로그아웃</button>
           </div>
 
-          {/* 탭: 5칸 같은 너비 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '4px', backgroundColor: '#fff', border: `1px solid ${THEME.border}`, borderRadius: '14px', padding: '4px', marginBottom: '16px', position: 'sticky', top: '64px', zIndex: 50 }}>
+          {/* 탭: 6칸 같은 너비 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '4px', backgroundColor: '#fff', border: `1px solid ${THEME.border}`, borderRadius: '14px', padding: '4px', marginBottom: '16px', position: 'sticky', top: '64px', zIndex: 50 }}>
             {([
               ['orders', '주문', FileText, () => setAdminTab('orders')],
               ['productAdd', '상품등록', Plus, () => { setAdminTab('productAdd'); resetProductForm(); }],
               ['productEdit', '상품관리', List, () => { setAdminTab('productEdit'); setAdminEditPage(1); }],
+              ['collect', '수집함', Download, () => setAdminTab('collect')],
               ['dashboard', '매출', TrendingUp, () => setAdminTab('dashboard')],
               ['settings', '설정', LayoutGrid, () => setAdminTab('settings')],
             ] as [string, string, any, () => void][]).map(([key, label, Icon, onClick]) => {
@@ -2158,6 +2282,9 @@ export default function App() {
               return (
                 <button key={key} onClick={onClick} style={{ position: 'relative', height: '52px', border: 'none', borderRadius: '10px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', backgroundColor: active ? THEME.primary : 'transparent', color: active ? '#fff' : THEME.subText, fontSize: '11.5px', fontWeight: 'bold' }}>
                   <Icon size={18} />{label}
+                  {key === 'collect' && collectBox.length > 0 && (
+                    <span style={{ position: 'absolute', top: '4px', right: '4px', minWidth: '18px', height: '18px', padding: '0 5px', borderRadius: '9px', backgroundColor: '#1976d2', color: '#fff', fontSize: '10.5px', lineHeight: '18px', textAlign: 'center' }}>{collectBox.length}</span>
+                  )}
                   {key === 'orders' && newOrderCount > 0 && (
                     <span style={{ position: 'absolute', top: '4px', right: '6px', minWidth: '18px', height: '18px', padding: '0 5px', borderRadius: '9px', backgroundColor: '#e53935', color: '#fff', fontSize: '10.5px', lineHeight: '18px', textAlign: 'center' }}>{newOrderCount}</span>
                   )}
@@ -2308,12 +2435,107 @@ export default function App() {
           })()}
 
           {/* 📦 상품 등록 / 수정 폼 */}
+          {/* 📥 기린컴퍼니 수집함 */}
+          {adminTab === 'collect' && (() => {
+            const picked = collectBox.filter((it: any) => collectPicked[it.source_id]);
+            const pickedIds = picked.map((it: any) => it.source_id);
+            const fresh = collectBox.filter((it: any) => !existingSourceIds.has(it.source_id));
+            const catOptions = NEW_CATEGORY_OPTIONS;
+            return (
+              <div>
+                <div style={A.card}>
+                  <p style={A.cardTitle}>📥 기린컴퍼니 수집함 ({collectBox.length})</p>
+                  <p style={A.help}>기린컴퍼니 화면에서 수집기로 보낸 상품입니다. 확인·수정 후 등록하면 홈 화면 맨 앞에 보입니다. 사진은 기린 서버 주소를 그대로 써서 우리 저장 공간을 쓰지 않아요.</p>
+                  <p style={{ ...A.help, marginTop: '8px', color: usageInfo && usageInfo.collectMore < 200 ? '#c62828' : THEME.text, fontWeight: 'bold' }}>{usageLine}</p>
+                  {!hasSourceColumn && products.length > 0 && <p style={{ ...A.help, color: '#c62828' }}>먼저 Supabase › SQL Editor 에서 supabase/updates/07_collector_storage.sql 을 실행해주세요.</p>}
+                </div>
+
+                <details style={{ ...A.card }}>
+                  <summary style={{ fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🛒 수집기 설치 (처음 1번)</summary>
+                  <div style={{ fontSize: '13px', lineHeight: 1.7, marginTop: '10px' }}>
+                    <p style={{ margin: '0 0 8px' }}>PC 크롬에서 아래 노란 버튼을 <strong>즐겨찾기 막대로 끌어다 놓으세요</strong>. (즐겨찾기 막대가 안 보이면 Ctrl+Shift+B)</p>
+                    <a ref={bookmarkletRef} onClick={e => { e.preventDefault(); alert('클릭이 아니라, 즐겨찾기 막대로 끌어다 놓는 버튼이에요.'); }} style={{ display: 'inline-block', padding: '10px 18px', borderRadius: '10px', backgroundColor: '#FEE500', color: '#191919', fontWeight: 'bold', textDecoration: 'none', cursor: 'grab' }}>🛒 기린 수집기</a>
+                    <p style={{ margin: '10px 0 4px' }}>끌어다 놓기가 안 되면: 즐겨찾기 추가 → 이름 "기린 수집기" → URL 칸에 아래 주소 붙여넣기</p>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <code style={{ flex: 1, minWidth: 0, padding: '7px 10px', borderRadius: '8px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, fontSize: '11.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookmarkletCode}</code>
+                      <button onClick={async () => alert((await copyText(bookmarkletCode)) ? '복사했습니다.' : '복사 실패')} style={A.smallBtn('outline')}><Copy size={13} />복사</button>
+                    </div>
+                    <p style={{ margin: '10px 0 0', color: THEME.subText }}>사용: gi-rin.com 로그인 → 상품 목록이나 상세 화면에서 즐겨찾기의 <strong>🛒 기린 수집기</strong> 클릭 → 오른쪽 아래 패널에서 보낼 쇼핑몰 고르고<br />· 사진 왼쪽 위 ✓ 로 고른 뒤 [선택 수집] · [이 페이지 전체 수집] · [이 분류 전체 수집] · 상세 화면은 [이 상품 수집]<br />→ 이 관리자 창이 열리며 수집함으로 들어옵니다. (이 창에서 관리자 로그인 상태여야 해요)</p>
+                  </div>
+                </details>
+
+                {collectBox.length > 0 && (
+                  <div style={{ ...A.card }}>
+                    <p style={{ ...A.label }}>판매가 정하기</p>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
+                      <button onClick={() => setCollectRule('consumer')} style={chipStyle(collectRule === 'consumer', 'sub')}>소비자가 그대로</button>
+                      <button onClick={() => setCollectRule('rate')} style={chipStyle(collectRule === 'rate', 'sub')}>원가 ×</button>
+                      <input type="number" inputMode="numeric" value={collectRate} onChange={e => setCollectRate(Math.max(100, Math.min(400, parseInt(e.target.value) || 100)))} style={{ ...A.input, width: '84px', height: '36px' }} />
+                      <span style={{ fontSize: '13px' }}>%</span>
+                      <button onClick={() => setCollectBox(prev => prev.map((it: any) => ({ ...it, price: collectPrice(it, collectRule, collectRate) })))} style={A.smallBtn('dark')}>전체에 적용</button>
+                    </div>
+                    <p style={{ ...A.help, margin: '0 0 10px' }}>추가금(예: 13(+3,000원))은 기린 도매 금액 그대로 들어와요. 필요하면 옵션 칸에서 고쳐주세요.</p>
+                    <div style={{ ...A.row2 }}>
+                      <button onClick={() => { const all = fresh.every((it: any) => collectPicked[it.source_id]); const n: Record<string, boolean> = {}; if (!all) fresh.forEach((it: any) => { n[it.source_id] = true; }); setCollectPicked(n); }} style={{ ...A.btn('outline'), height: '40px', fontSize: '13px' }}>새 상품 전체 선택 ({fresh.length})</button>
+                      <button onClick={() => { if (window.confirm(`선택한 ${picked.length}개를 수집함에서 뺄까요? (등록된 상품은 그대로)`)) { setCollectBox(prev => prev.filter((it: any) => !collectPicked[it.source_id])); setCollectPicked({}); } }} disabled={!picked.length} style={{ ...A.btn('danger'), height: '40px', fontSize: '13px', opacity: picked.length ? 1 : 0.4 }}>선택 빼기</button>
+                    </div>
+                    <button onClick={() => registerCollected(pickedIds)} disabled={isRegistering || !picked.length} style={{ ...A.btn('primary'), marginTop: '8px', opacity: picked.length ? 1 : 0.4 }}>{isRegistering ? '등록 중...' : `✅ 선택한 ${picked.length}개 등록`}</button>
+                  </div>
+                )}
+
+                {collectBox.length === 0 ? (
+                  <div style={{ ...A.card, textAlign: 'center', color: THEME.subText, fontSize: '14px', padding: '40px 18px' }}>수집함이 비어 있습니다. 기린컴퍼니 화면에서 🛒 기린 수집기로 상품을 보내주세요.</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+                    {collectBox.map((it: any) => {
+                      const dup = existingSourceIds.has(it.source_id);
+                      const on = !!collectPicked[it.source_id];
+                      const price = it.price || collectPrice(it, collectRule, collectRate);
+                      const cat = it.category2 ?? suggestNewCategory({ name: it.name, category: '' }).category2;
+                      const small: React.CSSProperties = { ...A.input, height: '32px', fontSize: '12px', padding: '0 8px' };
+                      return (
+                        <div key={it.source_id} style={{ backgroundColor: '#fff', borderRadius: '14px', border: `2px solid ${on ? THEME.primary : THEME.border}`, padding: '10px', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0, opacity: dup ? 0.55 : 1 }}>
+                          <div style={{ display: 'flex', gap: '8px', minWidth: 0 }}>
+                            <label style={{ position: 'relative', flexShrink: 0, cursor: dup ? 'default' : 'pointer' }}>
+                              <img src={it.main_image} loading="lazy" style={{ width: '64px', height: '64px', objectFit: 'cover', borderRadius: '8px', display: 'block', backgroundColor: '#eee', filter: it.soldout ? 'grayscale(1)' : 'none' }} />
+                              <input type="checkbox" disabled={dup} checked={on} onChange={() => setCollectPicked(m => ({ ...m, [it.source_id]: !m[it.source_id] }))} style={{ position: 'absolute', left: '4px', top: '4px', width: '18px', height: '18px' }} />
+                            </label>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ fontSize: '11px', margin: 0, color: THEME.subText }}>
+                                {dup ? <span style={{ color: '#2e7d32', fontWeight: 'bold' }}>이미 등록됨 · </span> : null}
+                                {it.soldout && <span style={{ color: '#c62828', fontWeight: 'bold' }}>품절 · </span>}
+                                <a href={it.source_url} target="_blank" rel="noreferrer" style={{ color: THEME.subText }}>기린 {it.source_id.replace('girin:', '')}</a> · 상세 {it.sub_images.length}장
+                              </p>
+                              <input value={it.brand} onChange={e => updateCollected(it.source_id, { brand: e.target.value })} style={{ ...small, height: '26px', fontWeight: 'bold', color: THEME.primary, marginTop: '2px' }} />
+                              <input value={it.name} onChange={e => updateCollected(it.source_id, { name: e.target.value })} style={{ ...small, height: '28px', fontWeight: 'bold', marginTop: '3px' }} />
+                            </div>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', fontSize: '11px', color: THEME.subText }}>
+                            <label>판매가 <input type="number" inputMode="numeric" value={price} onChange={e => updateCollected(it.source_id, { price: parseInt(e.target.value) || 0 })} style={small} /></label>
+                            <label>원가 (소비자가 {it.consumer_price.toLocaleString()}) <input type="number" inputMode="numeric" value={it.cost_price} onChange={e => updateCollected(it.source_id, { cost_price: parseInt(e.target.value) || 0 })} style={small} /></label>
+                          </div>
+                          <input value={it.colors} placeholder="색상" onChange={e => updateCollected(it.source_id, { colors: e.target.value })} style={small} title="색상" />
+                          <input value={it.sizes} placeholder="사이즈" onChange={e => updateCollected(it.source_id, { sizes: e.target.value })} style={small} title="사이즈" />
+                          <select value={cat || ''} onChange={e => updateCollected(it.source_id, { category2: e.target.value })} style={small}>
+                            <option value="">분류 선택</option>
+                            {catOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {adminTab === 'productAdd' && (
             <div>
               <div style={{ ...A.card, display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={A.cardTitle}>{editingProductId ? '상품 수정' : '새 상품 등록'}</p>
                   <p style={{ ...A.help, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{editingProductId ? prodName : '스마트 복붙 → 사진 → 정보 순서로 채워주세요'}</p>
+                  {!editingProductId && <p style={{ ...A.help, color: usageInfo && usageInfo.uploadMore < 100 ? '#c62828' : THEME.subText }}>{usageLine}</p>}
                 </div>
                 {editingProductId && <button onClick={() => { resetProductForm(); setAdminTab('productEdit'); }} style={A.smallBtn('outline')}>목록으로</button>}
               </div>
@@ -2842,6 +3064,41 @@ export default function App() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* 💾 저장 공간: Supabase 무료 한도 (DB 500MB · 사진 1GB · 전송량 월 5GB) */}
+              <div style={A.card}>
+                {settingsHeader('storage', '저장 공간 (무료 한도)', usageInfo ? `앞으로 약 ${usageInfo.collectMore.toLocaleString()}개 더 등록 가능 · DB ${usageInfo.dbPct}% · 사진 ${usageInfo.stPct}%` : (storageUsage?.error || '확인 중...'))}
+                {settingsOpen.storage && (() => {
+                  const u = storageUsage;
+                  if (!u || u.error) return <p style={{ ...A.help, marginTop: '12px', color: '#c62828' }}>{u?.error === 'SQL 07 실행 전' ? 'Supabase › SQL Editor 에서 supabase/updates/07_collector_storage.sql 을 실행해주세요.' : (u?.error || '불러오는 중...')}</p>;
+                  const meter = (label: string, used: number, limit: number, note: string) => {
+                    const pct = Math.min(100, Math.round(used / limit * 100));
+                    return (
+                      <div style={{ marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}><strong>{label}</strong><span>{usageInfo!.mb(used)}MB / {Math.round(limit / 1024 / 1024)}MB ({pct}%)</span></div>
+                        <div style={{ height: '10px', borderRadius: '5px', backgroundColor: THEME.bg, overflow: 'hidden', border: `1px solid ${THEME.border}` }}><div style={{ width: `${pct}%`, height: '100%', backgroundColor: pct > 80 ? '#e53935' : pct > 60 ? '#fb8c00' : '#43a047' }} /></div>
+                        <p style={{ ...A.help, margin: '4px 0 0' }}>{note}</p>
+                      </div>
+                    );
+                  };
+                  return (
+                    <div style={{ marginTop: '16px' }}>
+                      {meter('상품·주문 데이터 (DB)', u.db_bytes, u.db_limit, `상품 ${u.products.toLocaleString()}개 (기린 수집 ${u.collected_products.toLocaleString()}개)`)}
+                      {meter('사진 저장소', u.storage_bytes, u.storage_limit, `사진 ${u.storage_files.toLocaleString()}장 · 직접 올린 사진을 쓰는 상품 ${u.uploaded_products.toLocaleString()}개`)}
+                      <div style={{ padding: '12px 14px', borderRadius: '12px', backgroundColor: THEME.primaryLight, fontSize: '13px', lineHeight: 1.7 }}>
+                        <strong>앞으로 더 등록할 수 있는 상품 (무료 한도의 90%까지)</strong><br />
+                        · 기린 수집 상품 (사진은 기린 서버): <strong>약 {usageInfo!.collectMore.toLocaleString()}개</strong><br />
+                        · 사진을 직접 올리는 상품 (대표+상세 2장 기준): <strong>약 {usageInfo!.uploadMore.toLocaleString()}개</strong>
+                      </div>
+                      <p style={{ ...A.help, marginTop: '10px' }}>
+                        ※ 사진 전송량(월 5GB)은 손님이 사진을 볼 때마다 쌓여서 여기서는 계산할 수 없어요. 사진을 직접 올린 상품이 많을수록 늘어납니다. 올리는 사진은 자동으로 줄여서 저장돼요.
+                        <br /><a href={`https://supabase.com/dashboard/project/${(supabaseUrl.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''}`} target="_blank" rel="noreferrer" style={{ color: THEME.primary }}>Supabase 사용량 보기 →</a>
+                      </p>
+                      <button onClick={fetchStorageUsage} style={{ ...A.btn('outline'), height: '38px', fontSize: '13px', marginTop: '6px' }}>다시 계산</button>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* 🗂️ 분류 정리: 새 분류(category2)·기획전 태그 — 확인 후 저장, [새 분류로 전환]을 켜야 손님 화면에 적용 */}

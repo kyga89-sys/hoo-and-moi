@@ -10,9 +10,11 @@
     { key: 'hoo', name: '후앤모아', url: 'https://hoo-and-moi.web.app' },
     { key: 'moaruni', name: '모아루니', url: 'https://moaruni-shop.web.app' }
   ];
+  // 시험용: 테스트 주소로 보내기 (window.__girinCollectorTest = 'https://…web.app')
+  if (window.__girinCollectorTest) SHOPS.unshift({ key: 'test', name: '테스트 주소', url: String(window.__girinCollectorTest).replace(/\/$/, '') });
   var DELAY = 350; // 상세 페이지를 하나씩 천천히 읽기 (기린 서버 부담 줄이기)
   var picked = {}; // product_no → true
-  var shopKey = localStorage.getItem('girin_collector_shop') || 'hoo';
+  var shopKey = window.__girinCollectorTest ? 'test' : (localStorage.getItem('girin_collector_shop') || 'hoo');
   var busy = false;
 
   // ---------- 화면 ----------
@@ -275,10 +277,12 @@
     if (e.data && e.data.type === 'hm-collector-ready') ready = true;
     if (e.data && e.data.type === 'hm-collector-ack') acked += e.data.count || 0;
   });
+  // 쇼핑몰 관리자 창은 버튼을 누른 순간 바로 열어야 브라우저가 막지 않음
   async function openTarget() {
     var shop = SHOPS.filter(function (s) { return s.key === shopKey; })[0];
     ready = false;
     target = window.open(shop.url + '/?collect=1', 'hm-collector-' + shop.key);
+    if (!target) throw new Error('팝업이 막혔습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 gi-rin.com 팝업을 허용해 주세요.');
     for (var i = 0; i < 120 && !ready; i++) {
       try { target.postMessage({ type: 'hm-collector-ping' }, shop.url); } catch (e) {}
       await sleep(500);
@@ -287,13 +291,13 @@
     return shop;
   }
 
-  async function collect(nos, label) {
+  async function collect(nos, label, opened) {
     if (busy || !nos.length) return;
     busy = true; refreshCount();
     Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { b.disabled = true; });
     var shop, items = [], fails = [];
     try {
-      shop = await openTarget();
+      shop = await (opened || openTarget());
       for (var i = 0; i < nos.length; i++) {
         status(label + ' ' + (i + 1) + ' / ' + nos.length + ' 읽는 중…', i / nos.length);
         try { items.push(await fetchDetail(nos[i])); } catch (e) { fails.push(nos[i]); }
@@ -324,9 +328,11 @@
     if (a === 'send-page') collect(listNos(document), '이 페이지');
     if (a === 'send-detail' && detailNo) collect([detailNo], '이 상품');
     if (a === 'send-cate') {
+      var opened = openTarget();
+      opened.catch(function () {});
       allCategoryNos().then(function (nos) {
         if (!nos.length) return status('⚠️ 이 분류에서 상품을 찾지 못했습니다.');
-        if (confirm('이 분류의 상품 ' + nos.length + '개를 모두 수집할까요? (약 ' + Math.ceil(nos.length * DELAY / 60000 + nos.length * 0.4 / 60) + '분)')) collect(nos, '분류 전체');
+        if (confirm('이 분류의 상품 ' + nos.length + '개를 모두 수집할까요? (약 ' + Math.ceil(nos.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 전체', opened);
         else status('취소했습니다.');
       }).catch(function (e2) { status('⚠️ ' + e2.message); });
     }
