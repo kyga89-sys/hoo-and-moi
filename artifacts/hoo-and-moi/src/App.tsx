@@ -2496,28 +2496,32 @@ export default function App() {
 
               {adminCurrentProducts.length > 0 ? (
                 <>
-                  <div style={{ backgroundColor: '#fff', borderRadius: '16px', border: `1px solid ${THEME.border}`, overflow: 'hidden' }}>
-                    {adminCurrentProducts.map((p, idx) => {
+                  {/* 한 줄에 2개씩: 사진·정보 위, 버튼 3개 아래 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+                    {adminCurrentProducts.map((p) => {
                       const margin = (p.price || 0) - (p.cost_price || 0);
                       return (
-                        <div key={p.id} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px', borderTop: idx === 0 ? 'none' : `1px solid ${THEME.border}` }}>
-                          <div style={{ position: 'relative', flexShrink: 0 }}>
-                            <img src={p.main_image} loading="lazy" style={{ width: '60px', height: '75px', objectFit: 'cover', borderRadius: '8px', backgroundColor: '#eee', display: 'block', filter: p.is_soldout ? 'grayscale(1)' : 'none', opacity: p.is_soldout ? 0.6 : 1 }} />
-                            {p.is_soldout && <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, textAlign: 'center', backgroundColor: 'rgba(40,40,40,0.85)', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '0 0 8px 8px', padding: '2px 0' }}>품절</span>}
+                        <div key={p.id} style={{ backgroundColor: '#fff', borderRadius: '14px', border: `1px solid ${THEME.border}`, padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
+                          <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', minWidth: 0 }}>
+                            <div style={{ position: 'relative', flexShrink: 0 }}>
+                              <img src={p.main_image} loading="lazy" style={{ width: '56px', height: '70px', objectFit: 'cover', borderRadius: '8px', backgroundColor: '#eee', display: 'block', filter: p.is_soldout ? 'grayscale(1)' : 'none', opacity: p.is_soldout ? 0.6 : 1 }} />
+                              {p.is_soldout && <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, textAlign: 'center', backgroundColor: 'rgba(40,40,40,0.85)', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '0 0 8px 8px', padding: '2px 0' }}>품절</span>}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ fontSize: '11px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.brand || '자체제작'}</p>
+                              <p style={{ fontSize: '11px', color: THEME.subText, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{catOf(p) || p.category || '분류 없음'}</p>
+                              <p style={{ fontSize: '13px', fontWeight: 'bold', margin: '0 0 3px 0', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-all' }}>{p.name}</p>
+                              <p style={{ fontSize: '12px', margin: 0, color: THEME.text }}>{p.price.toLocaleString()}원</p>
+                              <p style={{ fontSize: '11px', margin: 0, color: THEME.subText }}>
+                                원가 {(p.cost_price || 0).toLocaleString()}
+                                {p.cost_price > 0 && <span style={{ color: margin > 0 ? '#2e7d32' : '#c62828' }}> · 마진 {margin.toLocaleString()}</span>}
+                              </p>
+                            </div>
                           </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontSize: '11.5px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.brand || '자체제작'} <span style={{ color: THEME.subText, fontWeight: 'normal' }}>· {p.category || '분류 없음'}</span></p>
-                            <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 4px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
-                            <p style={{ fontSize: '12.5px', margin: 0, color: THEME.text }}>
-                              {p.price.toLocaleString()}원
-                              <span style={{ color: THEME.subText }}> · 원가 {(p.cost_price || 0).toLocaleString()}</span>
-                              {p.cost_price > 0 && <span style={{ color: margin > 0 ? '#2e7d32' : '#c62828' }}> · 마진 {margin.toLocaleString()}</span>}
-                            </p>
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0 }}>
-                            <button onClick={() => openEditProduct(p)} style={A.smallBtn('dark')}><Edit size={13} /> 수정</button>
-                            <button onClick={() => toggleSoldout(p)} style={{ ...A.smallBtn('outline'), color: p.is_soldout ? '#2e7d32' : THEME.text }}>{p.is_soldout ? '판매 재개' : '품절'}</button>
-                            <button onClick={() => deleteProduct(p.id)} style={A.smallBtn('danger')}><Trash2 size={13} /> 삭제</button>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '4px', marginTop: 'auto' }}>
+                            <button onClick={() => openEditProduct(p)} style={{ ...A.smallBtn('dark'), padding: 0 }}><Edit size={12} /> 수정</button>
+                            <button onClick={() => toggleSoldout(p)} style={{ ...A.smallBtn('outline'), padding: 0, color: p.is_soldout ? '#2e7d32' : THEME.text }}>{p.is_soldout ? '재개' : '품절'}</button>
+                            <button onClick={() => deleteProduct(p.id)} style={{ ...A.smallBtn('danger'), padding: 0 }}><Trash2 size={12} /> 삭제</button>
                           </div>
                         </div>
                       );
