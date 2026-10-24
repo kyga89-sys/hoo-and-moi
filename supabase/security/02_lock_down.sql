@@ -90,3 +90,21 @@ create policy "products 관리자 삭제" on storage.objects for delete to authe
 -- 9) 확인용: 남아 있는 storage 정책 목록 (products 와 무관한 "누구나 허용" 정책이 보이면 알려주세요)
 select policyname, cmd, roles, qual, with_check
 from pg_policies where schemaname = 'storage' and tablename = 'objects';
+
+-- 9) 업데이트 SQL(updates/01~05)로 추가된 칸도 손님이 다시 읽을 수 있게 (이 파일을 나중에 실행해도 화면이 깨지지 않도록)
+do $$
+begin
+  begin grant select (community_url, biz_owner, biz_number, ecommerce_number, biz_email) on public.store_settings to anon; exception when undefined_column then null; end;
+  begin grant select (home_layout) on public.store_settings to anon; exception when undefined_column then null; end;
+  begin grant select (list_price_rate) on public.store_settings to anon; exception when undefined_column then null; end;
+  begin grant select (use_new_category) on public.store_settings to anon; exception when undefined_column then null; end;
+  begin grant select (display_order) on public.products to anon; exception when undefined_column then null; end;
+  begin grant select (is_soldout, list_price) on public.products to anon; exception when undefined_column then null; end;
+  begin grant select (category2, tags) on public.products to anon; exception when undefined_column then null; end;
+end $$;
+
+-- 10) 확인용: 손님이 주문을 못 읽고(false), 원가를 못 읽고(false), 새 칸은 읽을 수 있으면(true) 성공
+select has_table_privilege('anon', 'public.orders', 'select') as 손님_주문읽기,
+       has_column_privilege('anon', 'public.products', 'cost_price', 'select') as 손님_원가읽기,
+       has_column_privilege('anon', 'public.products', 'is_soldout', 'select') as 손님_품절읽기,
+       has_column_privilege('anon', 'public.store_settings', 'biz_owner', 'select') as 손님_사업자정보읽기;
