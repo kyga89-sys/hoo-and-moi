@@ -1119,7 +1119,7 @@ export default function App() {
     markOrdersSeen(true);
     const { data: u } = await supabase.auth.getUser();
     if (u.user?.email) setAdminEmail(u.user.email);
-    await Promise.all([fetchAdminOrders(), fetchProducts(true)]);
+    await Promise.all([fetchAdminOrders(), fetchProducts(true), loadInbox()]);
     adminProductsReadyRef.current = true; // 등록된 기린 상품 번호까지 받은 뒤에만 수집기에 대답
     setCurrentView('admin');
     return true;
@@ -1260,15 +1260,67 @@ export default function App() {
     ...productsRef.current.map((p: any) => p.source_id).filter(Boolean),
     ...collectBoxRef.current.map((it: any) => it.source_id)
   ]));
+  // 수집함 저장 위치: DB(collect_inbox, SQL 08 실행 후) → PC·아이폰 어디서 수집해도 같은 수집함 / 표가 없으면 이 브라우저에만
+  const inboxModeRef = useRef<'unknown' | 'db' | 'local'>('unknown');
+  const inboxSyncedRef = useRef<Map<string, string>>(new Map()); // DB에 저장된 상태 (바뀐 것만 다시 저장)
+  const saveInboxRows = async (items: any[]) => {
+    for (let i = 0; i < items.length; i += 200) {
+      const rows = items.slice(i, i + 200).map((it: any) => ({ source_id: it.source_id, item: it, updated_at: new Date().toISOString() }));
+      const { error } = await supabase.from('collect_inbox').upsert(rows);
+      if (error) throw error;
+    }
+    items.forEach((it: any) => inboxSyncedRef.current.set(it.source_id, JSON.stringify(it)));
+  };
+  const loadInbox = async () => {
+    const { data, error } = await supabase.from('collect_inbox').select('source_id, item').order('created_at', { ascending: true });
+    if (error) { inboxModeRef.current = 'local'; return; }
+    inboxModeRef.current = 'db';
+    const dbItems = (data || []).map((r: any) => ({ ...r.item, source_id: r.source_id }));
+    inboxSyncedRef.current = new Map(dbItems.map((it: any) => [it.source_id, JSON.stringify(it)]));
+    // 예전처럼 이 브라우저에만 있던 수집함은 DB로 옮기기 (한 번만)
+    let legacy: any[] = [];
+    try { const v = JSON.parse(localStorage.getItem(COLLECT_BOX_KEY) || '[]'); if (Array.isArray(v)) legacy = v.filter((it: any) => it && it.source_id && !inboxSyncedRef.current.has(it.source_id)); } catch (e) {}
+    if (legacy.length) { try { await saveInboxRows(legacy); } catch (e) { legacy = []; } }
+    try { localStorage.removeItem(COLLECT_BOX_KEY); } catch (e) {}
+    const all = dbItems.concat(legacy);
+    collectBoxRef.current = all;
+    setCollectBox(all);
+  };
   const boxFullWarnedRef = useRef(false);
   useEffect(() => {
+    if (inboxModeRef.current === 'db') {
+      // 바뀐 상품만 저장하고, 빠진 상품은 지움 (0.5초 모아서)
+      const t = setTimeout(async () => {
+        const now = new Map(collectBox.map((it: any) => [it.source_id, JSON.stringify(it)]));
+        const changed = collectBox.filter((it: any) => inboxSyncedRef.current.get(it.source_id) !== now.get(it.source_id));
+        const removed = Array.from(inboxSyncedRef.current.keys()).filter(id => !now.has(id));
+        try {
+          if (changed.length) await saveInboxRows(changed);
+          if (removed.length) {
+            const { error } = await supabase.from('collect_inbox').delete().in('source_id', removed);
+            if (error) throw error;
+            removed.forEach(id => inboxSyncedRef.current.delete(id));
+          }
+        } catch (e: any) { console.warn('수집함 저장 실패', e?.message); }
+      }, 500);
+      return () => clearTimeout(t);
+    }
+    if (inboxModeRef.current !== 'local') return;
     try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); boxFullWarnedRef.current = false; }
     catch (e) { if (!boxFullWarnedRef.current) { boxFullWarnedRef.current = true; alert('수집함이 가득 찼습니다. 수집함의 상품을 먼저 등록하거나 지운 뒤 다시 수집해 주세요.'); } }
   }, [collectBox]);
+  // 다른 기기(아이폰 등)에서 수집한 상품도 보이게: 수집함을 열 때·화면으로 돌아올 때 다시 불러옴
+  useEffect(() => {
+    if (!isAdmin || adminTab !== 'collect') return;
+    loadInbox();
+    const onVis = () => { if (document.visibilityState === 'visible') loadInbox(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [isAdmin, adminTab]);
   useEffect(() => {
     // 수집기가 이 창을 열 때 붙인 확인 번호 (이 번호로 온 요청에만 대답 → 새로고침 직전 화면이 대신 받는 일 방지)
     const collectNonce = new URLSearchParams(window.location.search).get('cn') || '';
-    const onMsg = (e: MessageEvent) => {
+    const onMsg = async (e: MessageEvent) => {
       if (!COLLECT_ORIGIN_RE.test(e.origin) || !e.data || typeof e.data !== 'object') return;
       if (!collectNonce || e.data.nonce !== collectNonce) return;
       const src = e.source as Window | null;
@@ -1280,8 +1332,10 @@ export default function App() {
         const map = new Map(collectBoxRef.current.map((x: any) => [x.source_id, x]));
         items.forEach((it: any) => map.set(it.source_id, { ...(map.get(it.source_id) || {}), ...it }));
         const merged = Array.from(map.values());
-        try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(merged)); }
-        catch (err) { if (src) src.postMessage({ type: 'hm-collector-ack', nonce: collectNonce, received: 0, full: true, ids: [] }, e.origin); return; }
+        try {
+          if (inboxModeRef.current === 'db') await saveInboxRows(items.map((it: any) => map.get(it.source_id)));
+          else localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(merged));
+        } catch (err) { if (src) src.postMessage({ type: 'hm-collector-ack', nonce: collectNonce, received: 0, full: true, ids: [] }, e.origin); return; }
         collectBoxRef.current = merged;
         setCollectBox(merged);
         setAdminTab('collect');
