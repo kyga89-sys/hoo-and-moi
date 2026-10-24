@@ -2524,10 +2524,17 @@ export default function App() {
                       return (<>
                         <p style={{ margin: '0 0 8px', color: THEME.subText }}>아이폰은 <b>사파리</b>에서만 됩니다. 설치 후에는 기린 화면에서 [공유] → <b>{SHOP.nameKr} 수집기</b> 한 번이면 끝!</p>
                         {step('1', '스크립트 허용 켜기', <>아이폰 <b>설정</b> → <b>앱</b> → <b>단축어</b> → <b>고급</b> → <b>"스크립트 실행 허용"</b> 켜기 (예전 iOS는 설정 → 단축어 → 고급)</>)}
-                        {step('2', '코드 복사', <>아래 버튼을 눌러 수집기 코드를 복사하세요.<br />{copyBtn(iosCollectorCode, '수집기 코드 복사')}</>)}
-                        {step('3', '단축어 만들기', <><b>단축어</b> 앱 → 오른쪽 위 <b>＋</b> → 아래 검색창에 <b>"JavaScript"</b> → <b>"웹 페이지에서 JavaScript 실행"</b> 누르기 → 안에 있던 글을 모두 지우고 <b>붙여넣기</b></>)}
-                        {step('4', '공유 버튼에 넣기', <>맨 위 이름을 눌러 <b>"{SHOP.nameKr} 수집기"</b>로 바꾸고, 아래 <b>ⓘ</b> → <b>"공유 시트에 표시"</b> 켜기 → <b>완료</b></>)}
-                        {step('5', '기린에서 쓰기', <><b>사파리</b>로 gi-rin.com 로그인 → 상품 목록이나 상품 화면에서 아래 <b>공유 버튼(□↑)</b> → 맨 아래 <b>{SHOP.nameKr} 수집기</b> → 처음 한 번 <b>"허용"</b></>)}
+                        {SHOP.iosShortcutUrl ? (<>
+                          {step('2', '단축어 추가', <>아래 버튼을 누르면 단축어 앱이 열려요. <b>[단축어 추가]</b>만 누르면 설치 끝!<br /><a href={SHOP.iosShortcutUrl} target="_blank" rel="noreferrer" style={{ ...A.smallBtn('dark'), display: 'inline-flex', marginTop: '6px', textDecoration: 'none' }}>📲 {SHOP.nameKr} 수집기 단축어 추가하기</a></>)}
+                          {step('3', '기린에서 쓰기', <><b>사파리</b>로 gi-rin.com 로그인 → 상품 목록이나 상품 화면에서 아래 <b>공유 버튼(□↑)</b> → <b>{SHOP.nameKr} 수집기</b> → 처음 한 번 <b>"허용"</b></>)}
+                          <details style={{ marginTop: '4px' }}><summary style={{ cursor: 'pointer', color: THEME.subText }}>버튼이 안 될 때 (직접 만들기)</summary>{copyBtn(iosCollectorCode, '수집기 코드 복사')}<p style={{ margin: '6px 0 0' }}>단축어 앱 ＋ → [편집] → 동작 검색 "JavaScript" → "웹 페이지에서 JavaScript 실행" → 붙여넣기 → 파란 "웹 페이지"는 "단축어 입력"으로, 맨 위 받는 항목은 "Safari 웹 페이지"만 → 이름 "{SHOP.nameKr} 수집기" → ⓘ "공유 시트에 표시" 켜기</p></details>
+                        </>) : (<>
+                          {step('2', '코드 복사', <>아래 버튼을 눌러 수집기 코드를 복사하세요.<br />{copyBtn(iosCollectorCode, '수집기 코드 복사')}</>)}
+                          {step('3', '단축어 만들기', <><b>단축어</b> 앱 → 오른쪽 위 <b>＋</b> → <b>"단축어 설명"</b> 칸이 나오면 <b>아무것도 쓰지 말고</b> 오른쪽 위 <b>[편집]</b> → 아래 <b>"동작 검색"</b>에 <b>JavaScript</b> → <b>"웹 페이지에서 JavaScript 실행"</b> → 안에 있던 글을 모두 지우고 <b>붙여넣기</b></>)}
+                          {step('4', '두 군데 바꾸기', <>① 파란 글씨 <b>"웹 페이지"</b>를 눌러 <b>"단축어 입력"</b> 고르기<br />② 맨 위 파란 글씨(<b>"앱 및 …개"</b>)를 눌러 모두 끄고 <b>"Safari 웹 페이지"</b>만 켜기</>)}
+                          {step('5', '이름·공유 버튼', <>맨 위 이름을 <b>"{SHOP.nameKr} 수집기"</b>로 바꾸고, 아래 <b>ⓘ</b> → <b>"공유 시트에 표시"</b> 켜기 → <b>완료</b></>)}
+                          {step('6', '기린에서 쓰기', <><b>사파리</b>로 gi-rin.com 로그인 → 상품 목록이나 상품 화면에서 아래 <b>공유 버튼(□↑)</b> → <b>{SHOP.nameKr} 수집기</b> → 처음 한 번 <b>"허용"</b></>)}
+                        </>)}
                         <p style={{ margin: '4px 0 0', color: THEME.subText }}>· 아이폰에서 수집한 상품은 아이폰 사파리의 수집함에 들어가요. 등록도 아이폰에서 해 주세요. (사파리에서 이 관리자 화면에 로그인되어 있어야 해요)</p>
                       </>);
                     })()}

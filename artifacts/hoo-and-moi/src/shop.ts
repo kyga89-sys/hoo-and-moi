@@ -7,6 +7,8 @@ export const SHOP = {
   siteUrl: 'https://hoo-and-moi.web.app',
   kakaoUrl: 'https://open.kakao.com/o/sy8ZbjNi', // 1:1 채팅 (설정에서 변경)
   communityUrl: 'https://open.kakao.com/o/g48GLFNi', // 📢 신상 소식방 (설정에서 변경)
+  // 📱 아이폰 기린 수집기 단축어 iCloud 링크 (있으면 관리자 수집함에 [단축어 추가하기] 버튼)
+  iosShortcutUrl: '',
   shippingFee: 3500,
   introMain: '매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈',
   introSub: '편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀',
