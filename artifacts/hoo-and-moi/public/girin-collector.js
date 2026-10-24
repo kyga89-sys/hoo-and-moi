@@ -357,7 +357,8 @@
     if (e.data.type === 'hm-collector-ready' && e.data.nonce === nonce) {
       ready = true;
       if (Array.isArray(e.data.ids)) { known = {}; e.data.ids.forEach(function (id) { var n = String(id).replace(/^girin:/, ''); if (/^\d+$/.test(n)) known[n] = 1; }); saveKnown(); paint(); refreshCount();
-        if (detailNo && known[detailNo]) { $('send-detail').textContent = '이 상품은 이미 등록됨'; $('send-detail').disabled = true; } }
+        // 쇼핑몰에서 지운 상품은 다시 수집할 수 있게 버튼을 되살림
+        if (detailNo) { $('send-detail').textContent = known[detailNo] ? '이 상품은 이미 등록됨' : '📦 이 상품 수집'; $('send-detail').disabled = !!known[detailNo]; } }
     }
     if (e.data.type === 'hm-collector-ack' && e.data.nonce === nonce) {
       acked += e.data.received || 0;
