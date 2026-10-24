@@ -31,6 +31,31 @@ const getListPrice = (p: any, rate: number) => {
   const unit = raw < 10000 ? 100 : 1000;
   return Math.ceil(raw / unit) * unit;
 };
+// 📉 사진 줄여서 올리기 (Supabase 무료 전송량 5GB/월 보호)
+//   긴 변 1280px · JPEG 82% (배너는 1600px), 원본이 더 작으면 원본 그대로. 브라우저 1년 캐시로 재방문 시 다시 안 받음
+const compressImage = async (file: File, maxSide = 1280, quality = 0.82): Promise<Blob> => {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', quality));
+    return blob && blob.size < file.size ? blob : file;
+  } catch (e) { return file; }
+};
+const uploadImage = async (prefix: string, file: File, maxSide = 1280) => {
+  const body = await compressImage(file, maxSide);
+  const ext = body === file ? (file.name.split('.').pop() || 'jpg') : 'jpg';
+  const fileName = `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+  const { error } = await supabase.storage.from('products').upload(fileName, body, { cacheControl: '31536000', contentType: body.type || file.type });
+  if (error) throw error;
+  return supabase.storage.from('products').getPublicUrl(fileName).data.publicUrl;
+};
 const getDiscountRate = (price: number, listPrice: number) => listPrice > price ? Math.round((listPrice - price) / listPrice * 100) : 0;
 const isOptionSoldOut = (opt: string) => /품절/.test(opt || '');
 
@@ -869,10 +894,7 @@ export default function App() {
     try {
       let imageUrl = notice?.image_url || null;
       if (noticeFile) {
-        const fileName = `notice_${Date.now()}.${noticeFile.name.split('.').pop()}`;
-        await supabase.storage.from('products').upload(fileName, noticeFile);
-        const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-        imageUrl = data.publicUrl;
+        imageUrl = await uploadImage('notice', noticeFile);
       }
       await supabase.from('notices').upsert([{ id: 1, content: noticeInput, image_url: imageUrl, is_active: status }]);
       alert(`공지사항이 ${status ? '활성화' : '숨김'} 처리되었습니다.`); fetchNoticesAndBanner();
@@ -883,10 +905,8 @@ export default function App() {
     if (!bannerFile) return alert("배너 이미지를 첨부해주세요.");
     setIsBannerUploading(true);
     try {
-      const fileName = `banner_${Date.now()}.${bannerFile.name.split('.').pop()}`;
-      await supabase.storage.from('products').upload(fileName, bannerFile);
-      const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-      await supabase.from('notices').upsert([{ id: 2, image_url: data.publicUrl, is_active: true }]);
+      const bannerUrl = await uploadImage('banner', bannerFile, 1600);
+      await supabase.from('notices').upsert([{ id: 2, image_url: bannerUrl, is_active: true }]);
       alert("메인 배너가 적용되었습니다!"); setBannerFile(null); fetchNoticesAndBanner();
     } catch (error: any) { alert("배너 저장 실패: " + error.message); } finally { setIsBannerUploading(false); }
   };
@@ -921,16 +941,13 @@ export default function App() {
       if (inputSubImageUrls) sub_images_array.push(...inputSubImageUrls.split(/,|\n/).map(s => s.trim()).filter(Boolean));
       if (prodFiles && prodFiles.length > 0) {
         for (let i = 0; i < prodFiles.length; i++) {
-          const file = prodFiles[i]; const fileName = `main_${Date.now()}_${i}.${file.name.split('.').pop()}`;
-          await supabase.storage.from('products').upload(fileName, file); const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-          if (i === 0) main_image = data.publicUrl; else sub_images_array.push(data.publicUrl); 
+          const url = await uploadImage('main', prodFiles[i]);
+          if (i === 0) main_image = url; else sub_images_array.push(url);
         }
       }
       if (subProdFiles && subProdFiles.length > 0) {
         for (let i = 0; i < subProdFiles.length; i++) {
-          const file = subProdFiles[i]; const fileName = `sub_${Date.now()}_${i}.${file.name.split('.').pop()}`;
-          await supabase.storage.from('products').upload(fileName, file); const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-          sub_images_array.push(data.publicUrl);
+          sub_images_array.push(await uploadImage('sub', subProdFiles[i]));
         }
       }
       const productData: any = { name: prodName, price: parseInt(prodPrice), cost_price: parseInt(prodCostPrice) || 0, category: prodCategory, brand: prodBrand, description: prodDesc, sizes: prodSizes, colors: prodColors };
