@@ -47,7 +47,8 @@
     '.gcl-host{position:relative!important}',
     '.gcl-host.gcl-on{outline:3px solid #F06A7D;outline-offset:-3px}',
     '.gcl-chk.done{background:#2e7d32;cursor:default;width:auto;padding:0 8px;font:700 12px "Malgun Gothic"}',
-    '.gcl-host.gcl-done img{opacity:.45}'
+    '.gcl-host.gcl-done img{opacity:.45}',
+    '.gcl-chk.sold{background:#777;width:auto;padding:0 8px;font:700 12px "Malgun Gothic"}'
   ].join('\n');
 
   var box = document.createElement('div');
@@ -115,6 +116,17 @@
     return Array.prototype.slice.call((root || D()).querySelectorAll('ul.prdList > li[id^="anchorBoxId_"]'));
   }
   function noOf(li) { return (li.id.match(/anchorBoxId_(\d+)/) || [])[1]; }
+  // 기린이 품절 상품에 보여주는 품절 아이콘·버튼 (숨김 처리된 것은 제외)
+  function visibleSoldout(root) {
+    return Array.prototype.some.call(root.querySelectorAll('img[src*="soldout"], img[alt="품절"]'), function (img) {
+      for (var p = img; p && p !== root.parentNode; p = p.parentNode) {
+        if (p.classList && p.classList.contains('displaynone')) return false;
+        if (p.style && p.style.display === 'none') return false;
+      }
+      return true;
+    });
+  }
+  var soldCard = {};
   function refreshCount() {
     var n = Object.keys(picked).length, t = '✅ 선택한 ' + n + '개 수집', b = $('send-picked');
     if (b.textContent !== t) b.textContent = t;
@@ -141,10 +153,15 @@
   function paint() {
     cards().forEach(function (li) {
       var no = noOf(li), done = !!known[no];
+      if (soldCard[no] == null) soldCard[no] = visibleSoldout(li);
       if (done) delete picked[no];
       var on = !!picked[no];
       var c = li.querySelector('.gcl-chk');
-      if (c) { c.classList.toggle('on', on); c.classList.toggle('done', done); var t = done ? '등록됨' : '✓'; if (c.textContent !== t) c.textContent = t; }
+      if (c) {
+        c.classList.toggle('on', on); c.classList.toggle('done', done); c.classList.toggle('sold', !done && !on && soldCard[no]);
+        var t = done ? '등록됨' : (on ? '✓' : (soldCard[no] ? '품절' : '✓'));
+        if (c.textContent !== t) c.textContent = t;
+      }
       var h = li.querySelector('.gcl-host'); if (h) { h.classList.toggle('gcl-on', on); h.classList.toggle('gcl-done', done); }
     });
   }
@@ -280,7 +297,8 @@
       if (/\/(mono_design|_skin|common|button|btn_|icon|banner|delivery|review|notice|guide)/i.test(u)) return;
       if (detail.indexOf(u) < 0 && u !== main) detail.push(u);
     });
-    var allSold = combos.length > 0 && combos.every(function (c) { return c.soldout; });
+    var info = d.querySelector('.detailArea') || d.body;
+    var allSold = (combos.length > 0 && combos.every(function (c) { return c.soldout; })) || visibleSoldout(info);
 
     return {
       source: 'girin', source_id: 'girin:' + no, source_url: location.origin + '/product/detail.html?product_no=' + no,
@@ -297,11 +315,18 @@
   }
 
   // ---------- 분류 전체: 모든 페이지 목록 모으기 ----------
-  function listNos(doc) { return cards(doc).map(noOf).filter(Boolean); }
+  // 페이지·분류 전체 수집은 품절 상품 제외 (하나씩 고르면 품절도 수집 가능)
+  var lastSoldSkipped = 0;
+  function listNos(doc) {
+    var all = cards(doc), out = [];
+    all.forEach(function (li) { var n = noOf(li); if (!n) return; if (visibleSoldout(li)) { soldCard[n] = true; lastSoldSkipped++; return; } out.push(n); });
+    return out;
+  }
   async function allCategoryNos() {
     var cate = (here().search.match(/cate_no=(\d+)/) || [])[1];
     if (!cate) throw new Error('분류 목록 화면에서 눌러 주세요.');
     var nos = [], page = 1, seen = {};
+    lastSoldSkipped = 0;
     while (page < 200) {
       status('목록 읽는 중… ' + page + '페이지 (' + nos.length + '개)');
       var html = await fetch('/product/list.html?cate_no=' + cate + '&page=' + page, { credentials: 'include' }).then(function (r) { return r.text(); });
@@ -375,18 +400,18 @@
     var a = e.target.getAttribute && e.target.getAttribute('data-a');
     if (!a) return;
     if (a === 'close') { if (confirm('수집기를 끌까요? (지금 보던 기린 화면으로 돌아갑니다)')) location.href = here().href; return; }
-    if (a === 'pickall') { cards().forEach(function (li) { var n = noOf(li); if (n && !known[n]) picked[n] = true; }); paint(); refreshCount(); }
+    if (a === 'pickall') { lastSoldSkipped = 0; listNos(D()).forEach(function (n) { if (!known[n]) picked[n] = true; }); paint(); refreshCount(); if (lastSoldSkipped) status('품절 ' + lastSoldSkipped + '개는 빼고 골랐습니다. (필요하면 하나씩 ✓)'); }
     if (a === 'sync') { openTarget().then(function () { status('🔄 ' + SHOP_NAME + '에 이미 있는 기린 상품 ' + Object.keys(known).length + '개를 "등록됨"으로 표시했습니다.'); }).catch(function (e3) { status('⚠️ ' + e3.message); }); }
     if (a === 'clear') { picked = {}; paint(); refreshCount(); }
     if (a === 'send-picked') collect(Object.keys(picked), '선택');
-    if (a === 'send-page') collect(listNos(D()), '이 페이지');
+    if (a === 'send-page') { lastSoldSkipped = 0; var pn = listNos(D()); collect(pn, '이 페이지' + (lastSoldSkipped ? '(품절 ' + lastSoldSkipped + '개 제외)' : '')); }
     if (a === 'send-detail' && detailNo) collect([detailNo], '이 상품');
     if (a === 'send-cate') {
       var opened = openTarget();
       opened.catch(function () {});
       allCategoryNos().then(function (nos) {
         if (!nos.length) return status('⚠️ 이 분류에서 상품을 찾지 못했습니다.');
-        if (confirm('이 분류의 상품 ' + nos.length + '개를 모두 수집할까요? (약 ' + Math.ceil(nos.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 전체', opened);
+        if (confirm('이 분류의 상품 ' + nos.length + '개를 모두 수집할까요?' + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(nos.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 전체', opened);
         else status('취소했습니다.');
       }).catch(function (e2) { status('⚠️ ' + e2.message); });
     }
