@@ -203,7 +203,7 @@
     var d = new DOMParser().parseFromString(html, 'text/html');
     var get = function (re) { var m = html.match(re); return m ? m[1] : ''; };
     // 이름·브랜드·문구 속 색상/사이즈: "나비KC 버드캡모자<그린/네이비>*S~M*"
-    var rawName = get(/var\s+product_name\s*=\s*'([^']*)'/).replace(/<br\s*\/?>/gi, '\n');
+    var rawName = get(/var\s+product_name\s*=\s*'((?:[^'\\]|\\.)*)'/).replace(/\\'/g, "'").replace(/<br\s*\/?>/gi, '\n');
     if (!rawName) { var h3 = d.querySelector('.infoArea h3'); rawName = h3 ? h3.innerText || h3.textContent : ''; }
     var lines = rawName.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
     var first = (lines[0] || '').replace(/\(해외배송 가능상품\)/, '').trim();
@@ -237,7 +237,7 @@
     }).filter(function (x) { return x.values.length; });
     var stock = {};
     try {
-      var raw = get(/option_stock_data\s*=\s*'([^']*)'/);
+      var raw = get(/option_stock_data\s*=\s*'((?:[^'\\]|\\.)*)'/);
       if (raw) stock = JSON.parse(JSON.parse('"' + raw.replace(/"/g, '\\"') + '"'));
     } catch (e) { try { stock = JSON.parse(raw.replace(/\\"/g, '"').replace(/\\\\/g, '\\')); } catch (e2) { stock = {}; } }
     var combos = Object.keys(stock).map(function (k) {
@@ -297,8 +297,9 @@
       if (/\/(mono_design|_skin|common|button|btn_|icon|banner|delivery|review|notice|guide)/i.test(u)) return;
       if (detail.indexOf(u) < 0 && u !== main) detail.push(u);
     });
-    var info = d.querySelector('.detailArea') || d.body;
-    var allSold = (combos.length > 0 && combos.every(function (c) { return c.soldout; })) || visibleSoldout(info);
+    // 품절 아이콘은 상품 정보 칸에서만 확인 (관련 상품 목록의 품절 아이콘에 속지 않게)
+    var info = d.querySelector('.detailArea .infoArea') || d.querySelector('.infoArea') || d.querySelector('.detailArea');
+    var allSold = (combos.length > 0 && combos.every(function (c) { return c.soldout; })) || (info ? visibleSoldout(info) : false);
 
     return {
       source: 'girin', source_id: 'girin:' + no, source_url: location.origin + '/product/detail.html?product_no=' + no,
@@ -349,7 +350,7 @@
   }
 
   // ---------- 쇼핑몰 관리자 창으로 보내기 (이 수집기를 내려준 쇼핑몰만) ----------
-  var target = null, ready = false, nonce = '', acked = 0;
+  var target = null, ready = false, nonce = '', acked = 0, boxFull = false, rejected = 0;
   var shop = { name: SHOP_NAME, url: SHOP_URL };
   window.addEventListener('message', function (e) {
     if (e.origin !== SHOP_URL || !e.data) return;
@@ -362,12 +363,14 @@
     }
     if (e.data.type === 'hm-collector-ack' && e.data.nonce === nonce) {
       acked += e.data.received || 0;
+      if (e.data.full) boxFull = true;
+      rejected += e.data.rejected || 0;
       if (Array.isArray(e.data.ids)) { e.data.ids.forEach(function (id) { known[String(id).replace(/^girin:/, '')] = 1; }); saveKnown(); paint(); }
     }
   });
   // 쇼핑몰 관리자 창은 버튼을 누른 순간 바로 열어야 브라우저가 막지 않음
   async function openTarget() {
-    ready = false; acked = 0;
+    ready = false; acked = 0; boxFull = false; rejected = 0;
     nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
     target = window.open(SHOP_URL + '/?collect=1&cn=' + nonce, 'hm-collector-' + KEY);
     if (!target) throw new Error('팝업이 막혔습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 gi-rin.com 팝업을 허용해 주세요.');
@@ -401,9 +404,10 @@
         await sleep(DELAY);
       }
       // 쇼핑몰이 받았다고 확인한 수 기다리기 (최대 10초)
-      for (var w = 0; w < 20 && acked < sent; w++) await sleep(500);
+      for (var w = 0; w < 20 && acked < sent && !boxFull; w++) await sleep(500);
+      if (boxFull) throw new Error(SHOP_NAME + ' 수집함이 가득 찼습니다. 수집함의 상품을 먼저 등록하거나 지운 뒤 다시 수집해 주세요.');
       if (acked < sent) throw new Error('보낸 ' + sent + '개 중 ' + acked + '개만 수집함에 도착했습니다. 쇼핑몰 창을 닫지 말고 다시 눌러 주세요.');
-      status('✅ ' + acked + '개가 ' + SHOP_NAME + ' 수집함에 도착했습니다.' + (skipped ? '\n↪ 이미 등록·수집된 ' + skipped + '개는 건너뜀' : '') + (fails.length ? '\n⚠️ 실패 ' + fails.length + '개: ' + fails.slice(0, 5).join(', ') : '') + '\n쇼핑몰 창 › 관리자 › 📥 수집함에서 확인 후 등록하세요.', 1);
+      status('✅ ' + (acked - rejected) + '개가 ' + SHOP_NAME + ' 수집함에 도착했습니다.' + (rejected ? '\n⚠️ 대표 사진·이름이 없어 ' + rejected + '개는 빠짐' : '') + (skipped ? '\n↪ 이미 등록·수집된 ' + skipped + '개는 건너뜀' : '') + (fails.length ? '\n⚠️ 실패 ' + fails.length + '개: ' + fails.slice(0, 5).join(', ') : '') + '\n쇼핑몰 창 › 관리자 › 📥 수집함에서 확인 후 등록하세요.', 1);
       picked = {}; paint();
       if (detailNo) { $('send-detail').textContent = '이 상품은 이미 등록됨'; }
     } catch (e) {

@@ -189,7 +189,7 @@ const cleanCollected = (it: any) => {
 const collectPrice = (it: any, rule: 'consumer' | 'rate', rate: number) => {
   const up100 = (n: number) => Math.ceil(n / 100) * 100;
   if (rule === 'consumer' && it.consumer_price > 0) return it.consumer_price;
-  return up100((it.cost_price || 0) * (rule === 'rate' ? rate : 160) / 100);
+  return up100((it.cost_price || 0) * rate / 100);
 };
 
 // 클립보드 복사 (구형 브라우저/인앱 브라우저 대비 textarea 방식 fallback)
@@ -1115,6 +1115,7 @@ export default function App() {
     const { data: u } = await supabase.auth.getUser();
     if (u.user?.email) setAdminEmail(u.user.email);
     await Promise.all([fetchAdminOrders(), fetchProducts(true)]);
+    adminProductsReadyRef.current = true; // 등록된 기린 상품 번호까지 받은 뒤에만 수집기에 대답
     setCurrentView('admin');
     return true;
   };
@@ -1245,6 +1246,7 @@ export default function App() {
 
   // 📥 기린컴퍼니 수집기 ↔ 관리자 창 (수집기가 이 창을 열고 상품을 보내옴, 관리자 로그인 상태에서만 받음)
   const isAdminRef = useRef(false);
+  const adminProductsReadyRef = useRef(false);
   isAdminRef.current = isAdmin;
   const collectBoxRef = useRef<any[]>([]);
   collectBoxRef.current = collectBox;
@@ -1253,7 +1255,11 @@ export default function App() {
     ...productsRef.current.map((p: any) => p.source_id).filter(Boolean),
     ...collectBoxRef.current.map((it: any) => it.source_id)
   ]));
-  useEffect(() => { try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); } catch (e) { alert('수집함이 가득 찼습니다. 수집함의 상품을 먼저 등록하거나 지운 뒤 다시 수집해 주세요.'); } }, [collectBox]);
+  const boxFullWarnedRef = useRef(false);
+  useEffect(() => {
+    try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); boxFullWarnedRef.current = false; }
+    catch (e) { if (!boxFullWarnedRef.current) { boxFullWarnedRef.current = true; alert('수집함이 가득 찼습니다. 수집함의 상품을 먼저 등록하거나 지운 뒤 다시 수집해 주세요.'); } }
+  }, [collectBox]);
   useEffect(() => {
     // 수집기가 이 창을 열 때 붙인 확인 번호 (이 번호로 온 요청에만 대답 → 새로고침 직전 화면이 대신 받는 일 방지)
     const collectNonce = new URLSearchParams(window.location.search).get('cn') || '';
@@ -1261,19 +1267,22 @@ export default function App() {
       if (!COLLECT_ORIGIN_RE.test(e.origin) || !e.data || typeof e.data !== 'object') return;
       if (!collectNonce || e.data.nonce !== collectNonce) return;
       const src = e.source as Window | null;
-      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && src) src.postMessage({ type: 'hm-collector-ready', nonce: collectNonce, ids: knownSourceIds() }, e.origin); return; }
+      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && adminProductsReadyRef.current && src) src.postMessage({ type: 'hm-collector-ready', nonce: collectNonce, ids: knownSourceIds() }, e.origin); return; }
       if (e.data.type === 'hm-collector-items' && Array.isArray(e.data.items) && isAdminRef.current) {
         const registered = new Set(productsRef.current.map((p: any) => p.source_id).filter(Boolean));
         const items = e.data.items.map(cleanCollected).filter((it: any) => /^girin:\d+$/.test(it.source_id) && it.name && it.main_image && !registered.has(it.source_id));
-        setCollectBox(prev => {
-          const map = new Map(prev.map((x: any) => [x.source_id, x]));
-          items.forEach((it: any) => map.set(it.source_id, { ...(map.get(it.source_id) || {}), ...it }));
-          return Array.from(map.values());
-        });
+        // 먼저 저장해 보고, 저장된 경우에만 "도착"으로 알림 (가득 차면 수집기에 실패로 알려 상품이 조용히 사라지지 않게)
+        const map = new Map(collectBoxRef.current.map((x: any) => [x.source_id, x]));
+        items.forEach((it: any) => map.set(it.source_id, { ...(map.get(it.source_id) || {}), ...it }));
+        const merged = Array.from(map.values());
+        try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(merged)); }
+        catch (err) { if (src) src.postMessage({ type: 'hm-collector-ack', nonce: collectNonce, received: 0, full: true, ids: [] }, e.origin); return; }
+        collectBoxRef.current = merged;
+        setCollectBox(merged);
         setAdminTab('collect');
         // 받은 수(이미 등록돼 건너뛴 것 포함)와 번호를 알려줌 → 수집기가 "등록됨" 표시
         const skippedIds = e.data.items.map((it: any) => String(it && it.source_id || '')).filter((id: string) => registered.has(id));
-        if (src) src.postMessage({ type: 'hm-collector-ack', nonce: collectNonce, received: e.data.items.length, ids: items.map((it: any) => it.source_id).concat(skippedIds) }, e.origin);
+        if (src) src.postMessage({ type: 'hm-collector-ack', nonce: collectNonce, received: e.data.items.length, rejected: e.data.items.length - items.length - skippedIds.length, ids: items.map((it: any) => it.source_id).concat(skippedIds) }, e.origin);
       }
     };
     window.addEventListener('message', onMsg);
@@ -1343,7 +1352,13 @@ export default function App() {
       });
       for (let i = 0; i < rows.length; i += 50) {
         const { error } = await supabase.from('products').insert(rows.slice(i, i + 50));
-        if (error) throw error;
+        if (error) {
+          // 앞 묶음은 이미 들어갔으니 수집함에서 빼고 목록을 새로 받아 둠 → 다시 누르면 나머지만 등록
+          const doneIds = new Set(rows.slice(0, i).map((r: any) => r.source_id));
+          if (doneIds.size) setCollectBox(prev => prev.filter((it: any) => !doneIds.has(it.source_id)));
+          await Promise.all([fetchProducts(true), fetchBrands()]);
+          throw new Error(`${error.message} (앞의 ${i}개는 등록됨, 나머지는 수집함에 남아 있음)`);
+        }
       }
       const done = new Set(list.map((it: any) => it.source_id));
       setCollectBox(prev => prev.filter((it: any) => !done.has(it.source_id)));
@@ -1356,6 +1371,7 @@ export default function App() {
 
   const handleAdminLogout = async () => {
     await supabase.auth.signOut();
+    adminProductsReadyRef.current = false;
     setIsAdmin(false); setAdminOrders([]);
     await fetchProducts(false);
     handleGoHome();
