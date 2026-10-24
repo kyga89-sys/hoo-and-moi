@@ -330,9 +330,12 @@
     while (page < 200) {
       status('목록 읽는 중… ' + page + '페이지 (' + nos.length + '개)');
       var html = await fetch('/product/list.html?cate_no=' + cate + '&page=' + page, { credentials: 'include' }).then(function (r) { return r.text(); });
-      var got = listNos(new DOMParser().parseFromString(html, 'text/html')).filter(function (n) { return !seen[n]; });
-      if (!got.length) break;
-      got.forEach(function (n) { seen[n] = 1; nos.push(n); });
+      var pdoc = new DOMParser().parseFromString(html, 'text/html');
+      // 상품 카드가 아예 없을 때만 끝 (품절만 있는 페이지도 다음 페이지는 계속 읽음)
+      var all = cards(pdoc).map(noOf).filter(function (n) { return n && !seen[n]; });
+      if (!all.length) break;
+      all.forEach(function (n) { seen[n] = 1; });
+      listNos(pdoc).forEach(function (n) { nos.push(n); });
       page++; await sleep(DELAY);
     }
     return nos;
@@ -418,7 +421,7 @@
       var opened = openTarget();
       opened.catch(function () {});
       allCategoryNos().then(function (nos) {
-        if (!nos.length) return status('⚠️ 이 분류에서 상품을 찾지 못했습니다.');
+        if (!nos.length) return status(lastSoldSkipped ? '이 분류 상품 ' + lastSoldSkipped + '개가 모두 품절이라 수집할 상품이 없습니다.' : '⚠️ 이 분류에서 상품을 찾지 못했습니다.');
         if (confirm('이 분류의 상품 ' + nos.length + '개를 모두 수집할까요?' + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(nos.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 전체', opened);
         else status('취소했습니다.');
       }).catch(function (e2) { status('⚠️ ' + e2.message); });
