@@ -135,6 +135,8 @@ const DEFAULT_COMMUNITY_URL = 'https://open.kakao.com/o/g48GLFNi';
 const DEFAULT_LIST_PRICE_RATE = 30; // 정가 배율 기본값 (도매몰 수집 기본 30%)
 const GRID_STORAGE_KEY = 'hm_grid_cols';
 const ORDERS_SEEN_KEY = 'hm_admin_orders_seen';
+// 손님 화면 상품 목록 저장 (다음 방문 때 바로 표시, 원가는 저장하지 않음)
+const PRODUCTS_CACHE_KEY = 'hm_products_cache_v1';
 const KAKAO_STATE_KEY = 'hm_kakao_state';
 
 // 클립보드 복사 (구형 브라우저/인앱 브라우저 대비 textarea 방식 fallback)
@@ -183,7 +185,10 @@ const BASE_CATEGORIES = {
 };
 
 export default function App() {
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>(() => {
+    try { const c = JSON.parse(localStorage.getItem(PRODUCTS_CACHE_KEY) || 'null'); return Array.isArray(c) ? sortByDisplayOrder(c) : []; } catch (e) { return []; }
+  });
+  const [productsLoaded, setProductsLoaded] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
   const [cart, setCart] = useState<any[]>([]);
@@ -411,6 +416,8 @@ export default function App() {
   useEffect(() => { setAdminEditPage(1); }, [adminEditSearch, adminEditBrand, adminEditCategory, adminEditStatus]);
 
   useEffect(() => {
+    // 저장된 목록으로 먼저 화면을 채우고(공유 링크 상품도 바로 열기), 최신 목록은 받아서 교체
+    if (productsRef.current.length) showFetchedProducts(productsRef.current);
     fetchProducts(); fetchCategories(); fetchBrands(); fetchNoticesAndBanner(); fetchStoreSettings();
     const handleBeforeInstallPrompt = (e: any) => { e.preventDefault(); setDeferredPrompt(e); };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -542,51 +549,56 @@ export default function App() {
   };
 
   // 🔒 매입원가(cost_price)는 관리자 로그인 상태에서만 불러옴
+  // ⚡ 빠르게 보이기: ① 지난번 목록(브라우저 저장)을 바로 표시 ② 첫 화면 분량을 먼저 받아 표시
+  //    ③ 나머지는 한꺼번에 동시에 받아서 교체 — 서버에서 홈 노출 순서대로 정렬해서 받음
+  const showFetchedProducts = (list: any[]) => {
+    setProducts(sortByDisplayOrder(list));
+    setProductsLoaded(true);
+    const pId = new URLSearchParams(window.location.search).get("productId");
+    if (pId && currentViewRef.current !== 'detail') {
+      const targetProduct = list.find((p: any) => p.id.toString() === pId);
+      if (targetProduct) {
+        setSelectedProduct(targetProduct);
+        setSelectedSize("");
+        setSelectedColor("");
+        setQuantity(1);
+        setCurrentView("detail");
+      }
+    }
+  };
   const fetchProducts = async (withCost = isAdmin) => {
-    // 🚨 타입 에러 해결: any[]로 타입 명시
-    let allProducts: any[] = [];
-    let from = 0;
-    const step = 1000;
-    let fetchMore = true;
     // 새 칸 SQL 실행 전이면 있는 칸만으로 불러오기 (최신 → 노출순서 → 기본 순서로 시도)
     const colCandidates = [`${PUBLIC_PRODUCT_COLUMNS}, display_order, is_soldout, list_price`, `${PUBLIC_PRODUCT_COLUMNS}, display_order`, PUBLIC_PRODUCT_COLUMNS];
     let colIdx = 0;
+    const query = (from: number, to: number, count = false) => {
+      const cols = withCost ? "*" : colCandidates[colIdx];
+      let q: any = supabase.from("products").select(cols, count ? { count: 'exact' } : undefined);
+      if (withCost || colIdx < 2) q = q.order("display_order", { ascending: true, nullsFirst: true });
+      return q.order("created_at", { ascending: false }).range(from, to);
+    };
 
-    while (fetchMore) {
-      let { data, error } = await supabase
-        .from("products")
-        .select(withCost ? "*" : colCandidates[colIdx])
-        .order("created_at", { ascending: false })
-        .range(from, from + step - 1);
-      while (error && !withCost && colIdx < colCandidates.length - 1) {
-        colIdx += 1;
-        ({ data, error } = await supabase.from("products").select(colCandidates[colIdx]).order("created_at", { ascending: false }).range(from, from + step - 1));
-      }
-
-      if (data && data.length > 0) {
-        allProducts = [...allProducts, ...data];
-        from += step;
-        if (data.length < step) {
-          fetchMore = false; 
-        }
-      } else {
-        fetchMore = false;
-      }
+    const FIRST = 60;
+    let first: any = await query(0, FIRST - 1, true);
+    while (first.error && !withCost && colIdx < colCandidates.length - 1) {
+      colIdx += 1;
+      first = await query(0, FIRST - 1, true);
     }
+    if (first.error || !first.data) return;
+    const total: number = first.count ?? first.data.length;
+    // 저장된 목록이 없을 때만 첫 분량을 먼저 보여줌 (있으면 저장된 전체 목록이 이미 보이는 중)
+    if (productsRef.current.length === 0 && total > first.data.length) showFetchedProducts(first.data);
 
-    if (allProducts.length > 0) {
-      setProducts(sortByDisplayOrder(allProducts));
-      const pId = new URLSearchParams(window.location.search).get("productId");
-      if (pId) {
-        const targetProduct = allProducts.find((p: any) => p.id.toString() === pId);
-        if (targetProduct) {
-          setSelectedProduct(targetProduct);
-          setSelectedSize("");
-          setSelectedColor("");
-          setQuantity(1);
-          setCurrentView("detail");
-        }
-      }
+    const STEP = 1000;
+    const ranges: [number, number][] = [];
+    for (let from = FIRST; from < total; from += STEP) ranges.push([from, Math.min(from + STEP, total) - 1]);
+    const rest = await Promise.all(ranges.map(([f, t]) => query(f, t)));
+    const all: any[] = [...first.data];
+    const seen = new Set(all.map((p: any) => p.id));
+    rest.forEach((r: any) => (r.data || []).forEach((p: any) => { if (!seen.has(p.id)) { seen.add(p.id); all.push(p); } }));
+    if (rest.some((r: any) => r.error)) return; // 일부만 받았으면 이전 목록 유지
+    showFetchedProducts(all);
+    if (!withCost) {
+      try { localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(all)); } catch (e) {}
     }
   };
 
@@ -1499,7 +1511,7 @@ export default function App() {
             ) : null}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '6px 0 12px', fontSize: '13px', color: THEME.subText }}>
-              <span>총 <strong style={{ color: THEME.text }}>{displayProducts.length.toLocaleString()}</strong>개</span>
+              <span>{products.length === 0 && !productsLoaded ? '불러오는 중...' : <>총 <strong style={{ color: THEME.text }}>{displayProducts.length.toLocaleString()}</strong>개</>}</span>
               <span>{currentPage} / {totalPages} 페이지</span>
             </div>
 
@@ -1543,7 +1555,7 @@ export default function App() {
                 </div>
               </>
             ) : (
-              <div style={{ textAlign: 'center', padding: '60px 0', color: THEME.subText, fontSize: '15px' }}>등록된 상품이 없습니다.</div>
+              <div style={{ textAlign: 'center', padding: '60px 0', color: THEME.subText, fontSize: '15px' }}>{productsLoaded ? '등록된 상품이 없습니다.' : '상품을 불러오는 중입니다...'}</div>
             )}
           </div>
         </div>
