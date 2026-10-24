@@ -66,9 +66,9 @@
   }
   function noOf(li) { return (li.id.match(/anchorBoxId_(\d+)/) || [])[1]; }
   function refreshCount() {
-    var n = Object.keys(picked).length;
-    $('send-picked').textContent = '✅ 선택한 ' + n + '개 수집';
-    $('send-picked').disabled = !n || busy;
+    var n = Object.keys(picked).length, t = '✅ 선택한 ' + n + '개 수집', b = $('send-picked');
+    if (b.textContent !== t) b.textContent = t;
+    b.disabled = !n || busy;
   }
   function decorate() {
     cards().forEach(function (li) {
@@ -95,7 +95,13 @@
     });
   }
   decorate();
-  new MutationObserver(function () { decorate(); }).observe(document.body, { childList: true, subtree: true });
+  // 상품 목록이 새로 그려질 때만 체크박스 다시 달기 (수집기 자신의 변화는 무시, 0.3초 모아서 한 번)
+  var pend = 0;
+  new MutationObserver(function (muts) {
+    if (pend) return;
+    if (!muts.some(function (m) { return !box.contains(m.target) && !(m.target.classList && m.target.classList.contains('gcl-host')); })) return;
+    pend = setTimeout(function () { pend = 0; decorate(); }, 300);
+  }).observe(document.body, { childList: true, subtree: true });
 
   // ---------- 상세 페이지 읽기 ----------
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
