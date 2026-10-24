@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { SHOP } from './shop';
 import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, Grid2x2, Grid3x3, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp, ImageIcon, AlertCircle, Eye, EyeOff, Megaphone, Copy, Send, SquarePlus, Ellipsis, EllipsisVertical, ArrowDown, Menu } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
@@ -133,7 +134,7 @@ function SortableList<T>({ items, keyOf, onChange, render, maxHeight }: {
   );
 }
 
-const DEFAULT_COMMUNITY_URL = 'https://open.kakao.com/o/g48GLFNi';
+const DEFAULT_COMMUNITY_URL = SHOP.communityUrl;
 const DEFAULT_LIST_PRICE_RATE = 30; // 정가 배율 기본값 (도매몰 수집 기본 30%)
 const GRID_STORAGE_KEY = 'hm_grid_cols';
 const ORDERS_SEEN_KEY = 'hm_admin_orders_seen';
@@ -167,15 +168,7 @@ const KakaoIcon = ({ size = 20 }: { size?: number }) => (
   </svg>
 );
 
-const THEME = {
-  primary: '#F06A7D',
-  primaryLight: '#FFF0F2',
-  bg: '#FAF8F5',
-  text: '#333333',
-  subText: '#888888',
-  border: '#EEEEEE',
-  brown: '#6B5B53' 
-};
+const THEME = SHOP.theme;
 
 // 🗂️ 새 분류 (supabase/updates/05_new_category.sql 의 category2 칸) — 대분류 > 중분류, 이 순서대로 표시
 const NEW_CATEGORIES: Record<string, string[]> = {
@@ -279,7 +272,7 @@ export default function App() {
 
   // --- 수파베이스 연동 설정 ---
   const [shopSettings, setShopSettings] = useState({
-    shop_name: 'Hoo & Moi', shop_name_kr: '후앤모아', kakao_url: 'https://open.kakao.com/o/sy8ZbjNi', shipping_fee: 3500,
+    shop_name: SHOP.nameEn, shop_name_kr: SHOP.nameKr, kakao_url: SHOP.kakaoUrl, shipping_fee: SHOP.shippingFee,
     community_url: DEFAULT_COMMUNITY_URL, biz_owner: '', biz_number: '', ecommerce_number: '', biz_email: '',
     list_price_rate: DEFAULT_LIST_PRICE_RATE
   });
@@ -343,8 +336,8 @@ export default function App() {
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [isBannerUploading, setIsBannerUploading] = useState(false);
 
-  const [introMain, setIntroMain] = useState("매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈");
-  const [introSub, setIntroSub] = useState("편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀");
+  const [introMain, setIntroMain] = useState(SHOP.introMain);
+  const [introSub, setIntroSub] = useState(SHOP.introSub);
   const [introMainInput, setIntroMainInput] = useState("");
   const [introSubInput, setIntroSubInput] = useState("");
   const [isIntroUploading, setIsIntroUploading] = useState(false);
@@ -582,9 +575,9 @@ export default function App() {
       if (data && data.length > 0) {
         setBankInfo(data[0]); setEditBankInfo(data[0]);
         setShopSettings({
-          shop_name: data[0].shop_name || 'Hoo & Moi', shop_name_kr: data[0].shop_name_kr || '후앤모아',
-          kakao_url: data[0].kakao_url || 'https://open.kakao.com/o/sy8ZbjNi',
-          shipping_fee: data[0].shipping_fee !== undefined ? data[0].shipping_fee : 3500,
+          shop_name: data[0].shop_name || SHOP.nameEn, shop_name_kr: data[0].shop_name_kr || SHOP.nameKr,
+          kakao_url: data[0].kakao_url || SHOP.kakaoUrl,
+          shipping_fee: data[0].shipping_fee !== undefined ? data[0].shipping_fee : SHOP.shippingFee,
           community_url: data[0].community_url || DEFAULT_COMMUNITY_URL,
           biz_owner: data[0].biz_owner || '', biz_number: data[0].biz_number || '',
           ecommerce_number: data[0].ecommerce_number || '', biz_email: data[0].biz_email || '',
@@ -636,10 +629,10 @@ export default function App() {
       if (banner && banner.image_url) setMainBannerUrl(banner.image_url);
       if (intro && intro.content) {
         const parts = intro.content.split('||');
-        setIntroMain(parts[0] || "매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈"); setIntroMainInput(parts[0] || '');
-        setIntroSub(parts[1] || "편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀"); setIntroSubInput(parts[1] || '');
+        setIntroMain(parts[0] || SHOP.introMain); setIntroMainInput(parts[0] || '');
+        setIntroSub(parts[1] || SHOP.introSub); setIntroSubInput(parts[1] || '');
       } else {
-        setIntroMainInput("매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈"); setIntroSubInput("편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀");
+        setIntroMainInput(SHOP.introMain); setIntroSubInput(SHOP.introSub);
       }
     }
   };
@@ -1226,7 +1219,7 @@ export default function App() {
 
   const handleShareProduct = async () => {
     const shareUrl = `${window.location.origin}${window.location.pathname}?productId=${selectedProduct.id}`;
-    if (navigator.share) { try { await navigator.share({ title: selectedProduct.name, text: `${selectedProduct.name} - 후앤모아에서 확인해보세요!`, url: shareUrl }); } catch (err) {} } 
+    if (navigator.share) { try { await navigator.share({ title: selectedProduct.name, text: `${selectedProduct.name} - ${shopSettings.shop_name_kr}에서 확인해보세요!`, url: shareUrl }); } catch (err) {} } 
     else { navigator.clipboard.writeText(shareUrl); alert("상품 링크가 복사되었습니다!"); }
   };
 
@@ -2032,7 +2025,7 @@ export default function App() {
             </div>
 
             <label style={{ fontSize: '13px', fontWeight: 'bold', color: THEME.text, display: 'block', marginBottom: '8px' }}>주문번호 (또는 이름 입력)</label>
-            <input placeholder="HM-00000000-000" value={lookupOrderNumber} onChange={e => setLookupOrderNumber(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '10px', fontSize: '14px' }} />
+            <input placeholder={`${SHOP.orderPrefix}-00000000-000`} value={lookupOrderNumber} onChange={e => setLookupOrderNumber(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '12px', border: `1px solid ${THEME.border}`, marginBottom: '10px', fontSize: '14px' }} />
 
             <p style={{ fontSize: '13px', color: THEME.subText, textAlign: 'center', margin: '10px 0' }}>또는</p>
 
@@ -2546,8 +2539,8 @@ export default function App() {
                 {settingsOpen.shop && (
                   <div style={{ marginTop: '16px' }}>
                     <div style={{ ...A.row2, ...A.field }}>
-                      <div><label style={A.label}>영문 상호</label><input placeholder="예: Hoo & Moi" value={shopSettings.shop_name} onChange={e => setShopSettings({...shopSettings, shop_name: e.target.value})} style={A.input} /></div>
-                      <div><label style={A.label}>한글 상호</label><input placeholder="예: 후앤모아" value={shopSettings.shop_name_kr} onChange={e => setShopSettings({...shopSettings, shop_name_kr: e.target.value})} style={A.input} /></div>
+                      <div><label style={A.label}>영문 상호</label><input placeholder={`예: ${SHOP.nameEn}`} value={shopSettings.shop_name} onChange={e => setShopSettings({...shopSettings, shop_name: e.target.value})} style={A.input} /></div>
+                      <div><label style={A.label}>한글 상호</label><input placeholder={`예: ${SHOP.nameKr}`} value={shopSettings.shop_name_kr} onChange={e => setShopSettings({...shopSettings, shop_name_kr: e.target.value})} style={A.input} /></div>
                     </div>
                     <div style={A.field}><label style={A.label}>1:1 채팅 주소 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(주문서 전송 · 하단 문의하기)</span></label><input placeholder="https://open.kakao.com/o/..." value={shopSettings.kakao_url} onChange={e => setShopSettings({...shopSettings, kakao_url: e.target.value})} style={A.input} /></div>
                     <div style={A.field}><label style={A.label}>📢 신상 소식방 주소 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(단체 오픈채팅)</span></label><input placeholder="https://open.kakao.com/o/..." value={shopSettings.community_url} onChange={e => setShopSettings({...shopSettings, community_url: e.target.value})} style={A.input} /></div>
@@ -2688,7 +2681,7 @@ export default function App() {
                           <details style={{ borderTop: `1px solid ${THEME.border}`, paddingTop: '14px' }}>
                             <summary style={{ fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>처음 설정 방법 (카카오 앱 만들기, 1번만)</summary>
                             <div style={{ fontSize: '12.5px', color: THEME.text, lineHeight: 1.7, marginTop: '10px', padding: '12px', backgroundColor: THEME.bg, borderRadius: '10px' }}>
-                              <p style={{ margin: '0 0 6px' }}>1. developers.kakao.com 에 카카오 계정으로 로그인 → <strong>내 애플리케이션 › 애플리케이션 추가</strong> (이름 예: 후앤모아 알림)</p>
+                              <p style={{ margin: '0 0 6px' }}>1. developers.kakao.com 에 카카오 계정으로 로그인 → <strong>내 애플리케이션 › 애플리케이션 추가</strong> (이름 예: {SHOP.nameKr} 알림)</p>
                               <p style={{ margin: '0 0 2px' }}>2. <strong>플랫폼 › Web › 사이트 도메인</strong>에 아래 주소 등록</p>
                               {copyRow('사이트 도메인을', window.location.origin)}
                               <p style={{ margin: '8px 0 2px' }}>3. <strong>카카오 로그인</strong> 켜기(ON) → <strong>Redirect URI</strong>에 아래 주소 등록</p>
