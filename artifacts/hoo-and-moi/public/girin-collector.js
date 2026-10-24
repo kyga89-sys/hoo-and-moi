@@ -163,7 +163,7 @@
     b.disabled = !n || busy;
     var m = pendingCount(), c = box.querySelector('.cnt'), g = $('go');
     c.textContent = '담은 ' + m + '개';
-    g.textContent = '📤 ' + SHOP_NAME + ' 수집함으로 이동' + (m ? ' (' + m + '개 보내기)' : '');
+    g.textContent = '📤 수집함으로 이동' + (m ? ' (' + m + '개 보내기)' : '');
     g.disabled = busy;
   }
   function refreshDetail() {
@@ -509,7 +509,7 @@
       if (!savePending()) throw new Error('담을 공간이 가득 찼습니다. [수집함으로 이동]으로 먼저 보내 주세요.');
       picked = {}; paint();
       status('', 1);
-      askGo('🛒 ' + got + '개를 수집했어요',
+      askGo(got + '개를 수집했어요',
         '담은 상품 모두 ' + pendingCount() + '개' +
         (reg.length ? '\n이미 등록한 상품 ' + reg.length + '개는 뺐어요' : '') +
         (held.length ? '\n이미 담은 상품 ' + held.length + '개는 뺐어요' : '') +
