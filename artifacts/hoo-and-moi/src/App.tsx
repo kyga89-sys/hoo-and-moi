@@ -168,7 +168,7 @@ const PRODUCTS_CACHE_KEY = 'hm_products_cache_v1';
 const KAKAO_STATE_KEY = 'hm_kakao_state';
 // 📥 기린컴퍼니 수집함 (등록 전까지 이 브라우저에 보관)
 const COLLECT_BOX_KEY = 'hm_collect_box_v1';
-const COLLECT_ORIGIN_RE = /^https:\/\/(www\.)?gi-rin\.com$|^https:\/\/gilgilaa\.cafe24\.com$/;
+const COLLECT_ORIGIN_RE = /^https:\/\/(www\.|m\.)?gi-rin\.com$|^https:\/\/(m\.)?gilgilaa\.cafe24\.com$/;
 // 수집기에서 온 값만 골라 담기 (모양·길이 확인)
 const optNoComma = (s: string) => s.replace(/\(\+([\d,]+)원\)/g, (_m, n) => `(+${n.replace(/,/g, '')}원)`);
 const cleanCollected = (it: any) => {
@@ -340,6 +340,7 @@ export default function App() {
   // 📥 수집함 · 💾 저장 공간
   const [collectBox, setCollectBox] = useState<any[]>(() => { try { const v = JSON.parse(localStorage.getItem(COLLECT_BOX_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } });
   const [collectPicked, setCollectPicked] = useState<Record<string, boolean>>({});
+  const [collectGuide, setCollectGuide] = useState<'pc' | 'ios'>(() => (getInstallEnv().isIOS ? 'ios' : 'pc'));
   const [collectRule, setCollectRule] = useState<'consumer' | 'rate'>('consumer');
   // 배율 칸은 자유롭게 입력, 계산할 때만 100~400% 안으로 (입력 중에 고치면 150 → 400 이 되는 문제 방지)
   const [collectRateInput, setCollectRateInput] = useState('160');
@@ -1294,6 +1295,8 @@ export default function App() {
     return () => window.removeEventListener('message', onMsg);
   }, []);
   const bookmarkletCode = `javascript:(function(){var s=document.createElement('script');s.src='${SHOP.siteUrl}/girin-collector.js?v='+Date.now();document.body.appendChild(s);})();`;
+  // 아이폰 사파리: 단축어 앱 "웹 페이지에서 JavaScript 실행"에 넣는 코드 (공유 버튼 → 수집기)
+  const iosCollectorCode = `var s=document.createElement('script');s.src='${SHOP.siteUrl}/girin-collector.js?v='+Date.now();document.body.appendChild(s);completion();`;
   // React 는 javascript: 주소를 막기 때문에 직접 넣기 (즐겨찾기로 끌어다 놓는 버튼)
   useEffect(() => { if (bookmarkletRef.current) bookmarkletRef.current.setAttribute('href', bookmarkletCode); });
 
@@ -2489,17 +2492,46 @@ export default function App() {
                   {!hasSourceColumn && products.length > 0 && <p style={{ ...A.help, color: '#c62828' }}>먼저 Supabase › SQL Editor 에서 supabase/updates/07_collector_storage.sql 을 실행해주세요.</p>}
                 </div>
 
-                <details style={{ ...A.card }}>
+                <details style={{ ...A.card }} open={collectBox.length === 0}>
                   <summary style={{ fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🛒 수집기 설치 (처음 1번)</summary>
                   <div style={{ fontSize: '13px', lineHeight: 1.7, marginTop: '10px' }}>
-                    <p style={{ margin: '0 0 8px' }}>PC 크롬에서 아래 노란 버튼을 <strong>즐겨찾기 막대로 끌어다 놓으세요</strong>. (즐겨찾기 막대가 안 보이면 Ctrl+Shift+B)</p>
-                    <a ref={bookmarkletRef} onClick={e => { e.preventDefault(); alert('클릭이 아니라, 즐겨찾기 막대로 끌어다 놓는 버튼이에요.'); }} style={{ display: 'inline-block', padding: '10px 18px', borderRadius: '10px', backgroundColor: '#FEE500', color: '#191919', fontWeight: 'bold', textDecoration: 'none', cursor: 'grab' }}>🛒 기린 수집기</a>
-                    <p style={{ margin: '10px 0 4px' }}>끌어다 놓기가 안 되면: 즐겨찾기 추가 → 이름 "기린 수집기" → URL 칸에 아래 주소 붙여넣기</p>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <code style={{ flex: 1, minWidth: 0, padding: '7px 10px', borderRadius: '8px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, fontSize: '11.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookmarkletCode}</code>
-                      <button onClick={async () => alert((await copyText(bookmarkletCode)) ? '복사했습니다.' : '복사 실패')} style={A.smallBtn('outline')}><Copy size={13} />복사</button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+                      <button onClick={() => setCollectGuide('pc')} style={chipStyle(collectGuide === 'pc', 'sub')}>💻 PC 크롬</button>
+                      <button onClick={() => setCollectGuide('ios')} style={chipStyle(collectGuide === 'ios', 'sub')}>📱 아이폰 사파리</button>
                     </div>
-                    <p style={{ margin: '10px 0 0', color: THEME.subText }}>사용: gi-rin.com 로그인 → 상품 목록이나 상세 화면에서 즐겨찾기의 <strong>🛒 기린 수집기</strong> 클릭 → 오른쪽 아래에 수집 패널이 뜹니다<br />· 사진 왼쪽 위 ✓ 로 고른 뒤 [선택 수집] · [이 페이지 전체 수집] · [이 분류 여러 페이지 수집](한 번에 최대 50페이지) · 상세 화면은 [이 상품 수집]<br />→ 이 관리자 창이 열리며 수집함으로 들어옵니다. (이 창에서 관리자 로그인 상태여야 해요)</p>
+                    {(() => {
+                      const step = (n: string, title: string, body: React.ReactNode) => (
+                        <div style={{ display: 'flex', gap: '10px', padding: '10px', borderRadius: '10px', backgroundColor: THEME.bg, marginBottom: '6px' }}>
+                          <span style={{ flexShrink: 0, width: '24px', height: '24px', borderRadius: '50%', backgroundColor: THEME.primary, color: '#fff', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px' }}>{n}</span>
+                          <div style={{ minWidth: 0, flex: 1 }}><p style={{ margin: 0, fontWeight: 'bold' }}>{title}</p><div style={{ color: THEME.text }}>{body}</div></div>
+                        </div>
+                      );
+                      const key = (k: string) => <kbd style={{ display: 'inline-block', padding: '0 6px', border: `1px solid ${THEME.border}`, borderBottomWidth: '2px', borderRadius: '5px', backgroundColor: '#fff', fontSize: '12px', fontFamily: 'inherit' }}>{k}</kbd>;
+                      const copyBtn = (text: string, label: string) => <button onClick={async () => alert((await copyText(text)) ? '복사했습니다.' : '복사하지 못했어요. 다시 눌러 주세요.')} style={{ ...A.smallBtn('dark'), marginTop: '6px' }}><Copy size={13} />{label}</button>;
+                      if (collectGuide === 'pc') return (<>
+                        {step('1', '즐겨찾기 줄 켜기', <>크롬 화면에서 키보드 {key('Ctrl')} + {key('Shift')} + {key('B')} 를 한 번 누르세요. 주소창 바로 아래에 얇은 줄이 생깁니다. (이미 있으면 넘어가세요)</>)}
+                        {step('2', '노란 버튼을 그 줄로 끌어다 놓기', <>
+                          아래 버튼을 마우스로 <b>꾹 누른 채</b> 위쪽 얇은 줄까지 끌고 가서 놓으세요.<br />
+                          <a ref={bookmarkletRef} onClick={e => { e.preventDefault(); alert('누르는 게 아니라, 꾹 누른 채 위쪽 즐겨찾기 줄로 끌어다 놓는 버튼이에요.'); }} style={{ display: 'inline-block', margin: '6px 0 2px', padding: '10px 18px', borderRadius: '10px', backgroundColor: '#FEE500', color: '#191919', fontWeight: 'bold', textDecoration: 'none', cursor: 'grab' }}>🛒 {SHOP.nameKr} 수집기</a>
+                        </>)}
+                        {step('3', '기린에서 누르기', <>gi-rin.com 에 로그인하고 상품 목록이나 상품 화면에서, 즐겨찾기 줄의 <b>🛒 {SHOP.nameKr} 수집기</b>를 누르면 오른쪽 아래에 수집 패널이 뜹니다.</>)}
+                        <details style={{ marginTop: '4px' }}>
+                          <summary style={{ cursor: 'pointer', color: THEME.subText }}>끌어다 놓기가 안 될 때</summary>
+                          <p style={{ margin: '6px 0' }}>{key('Ctrl')} + {key('D')} 로 아무 즐겨찾기나 만든 뒤 [수정] → 이름 "{SHOP.nameKr} 수집기", URL 칸을 모두 지우고 아래 코드를 붙여넣기</p>
+                          {copyBtn(bookmarkletCode, '코드 복사')}
+                        </details>
+                      </>);
+                      return (<>
+                        <p style={{ margin: '0 0 8px', color: THEME.subText }}>아이폰은 <b>사파리</b>에서만 됩니다. 설치 후에는 기린 화면에서 [공유] → <b>{SHOP.nameKr} 수집기</b> 한 번이면 끝!</p>
+                        {step('1', '스크립트 허용 켜기', <>아이폰 <b>설정</b> → <b>앱</b> → <b>단축어</b> → <b>고급</b> → <b>"스크립트 실행 허용"</b> 켜기 (예전 iOS는 설정 → 단축어 → 고급)</>)}
+                        {step('2', '코드 복사', <>아래 버튼을 눌러 수집기 코드를 복사하세요.<br />{copyBtn(iosCollectorCode, '수집기 코드 복사')}</>)}
+                        {step('3', '단축어 만들기', <><b>단축어</b> 앱 → 오른쪽 위 <b>＋</b> → 아래 검색창에 <b>"JavaScript"</b> → <b>"웹 페이지에서 JavaScript 실행"</b> 누르기 → 안에 있던 글을 모두 지우고 <b>붙여넣기</b></>)}
+                        {step('4', '공유 버튼에 넣기', <>맨 위 이름을 눌러 <b>"{SHOP.nameKr} 수집기"</b>로 바꾸고, 아래 <b>ⓘ</b> → <b>"공유 시트에 표시"</b> 켜기 → <b>완료</b></>)}
+                        {step('5', '기린에서 쓰기', <><b>사파리</b>로 gi-rin.com 로그인 → 상품 목록이나 상품 화면에서 아래 <b>공유 버튼(□↑)</b> → 맨 아래 <b>{SHOP.nameKr} 수집기</b> → 처음 한 번 <b>"허용"</b></>)}
+                        <p style={{ margin: '4px 0 0', color: THEME.subText }}>· 아이폰에서 수집한 상품은 아이폰 사파리의 수집함에 들어가요. 등록도 아이폰에서 해 주세요. (사파리에서 이 관리자 화면에 로그인되어 있어야 해요)</p>
+                      </>);
+                    })()}
+                    <p style={{ margin: '10px 0 0', color: THEME.subText }}>사용법: 사진 왼쪽 위 ✓ 로 고른 뒤 [선택 수집] · [이 페이지 전체 수집] · [이 분류 여러 페이지 수집](한 번에 최대 50페이지) · 상품 화면은 [이 상품 수집] → 이 관리자 창이 열리며 수집함으로 들어옵니다.</p>
                   </div>
                 </details>
 

@@ -38,7 +38,9 @@
     '#gcl .row{display:grid;grid-template-columns:1fr 1fr;gap:6px}',
     '#gcl .st{font-size:12px;color:#555;min-height:18px;white-space:pre-line}',
     '#gcl .bar{height:6px;background:#eee;border-radius:3px;overflow:hidden}#gcl .bar i{display:block;height:100%;width:0;background:#F06A7D;transition:width .2s}',
-    '#gcl-frame{position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483640;background:#fff}'
+    '#gcl-frame{position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483640;background:#fff}',
+    '#gcl.mini .b{display:none}',
+    '@media (max-width:600px){#gcl{left:8px;right:8px!important;bottom:8px;width:auto;font-size:14px}#gcl button{height:42px;font-size:14px}#gcl .b{max-height:52vh;overflow:auto}}'
   ].join('\n');
   document.head.appendChild(css);
   var CARD_CSS = [
@@ -56,7 +58,7 @@
   if (document.querySelector('[id^="gcl"][data-shop]')) box.style.right = '330px'; // 다른 가게 수집기와 겹치지 않게
   box.setAttribute('data-shop', KEY);
   box.innerHTML =
-    '<div class="h"><span>🛒 ' + SHOP_NAME + ' 상품 수집기</span><span style="cursor:pointer" data-a="close">✕</span></div>' +
+    '<div class="h"><span>🛒 ' + SHOP_NAME + ' 상품 수집기</span><span><span style="cursor:pointer;padding:0 10px" data-a="mini">－</span><span style="cursor:pointer;padding:0 4px" data-a="close">✕</span></span></div>' +
     '<div class="b">' +
     '<div style="font-size:12px;color:#555">보내는 곳: <b>' + SHOP_NAME + '</b> 관리자 › 📥 수집함</div>' +
     '<button data-a="sync">🔄 이미 등록된 상품 확인</button>' +
@@ -113,9 +115,20 @@
 
   // ---------- 목록 카드에 체크박스 ----------
   function cards(root) {
-    return Array.prototype.slice.call((root || D()).querySelectorAll('ul.prdList > li[id^="anchorBoxId_"]'));
+    var r = root || D();
+    var pc = r.querySelectorAll('ul.prdList > li[id^="anchorBoxId_"]');
+    if (pc.length) return Array.prototype.slice.call(pc);
+    // 모바일 화면(m.gi-rin.com): 상품 목록 칸 안의 li
+    return Array.prototype.slice.call(r.querySelectorAll('.xans-product-listnormal li.xans-record-, .xans-product-listmain li.xans-record-, .xans-product-listnew li.xans-record-'))
+      .filter(function (li) { return li.querySelector('img') && noOf(li); });
   }
-  function noOf(li) { return (li.id.match(/anchorBoxId_(\d+)/) || [])[1]; }
+  function noOf(li) {
+    var m = (li.id || '').match(/anchorBoxId_(\d+)/);
+    if (m) return m[1];
+    var a = li.querySelector('a[href*="product_no="], a[href*="/product/"]');
+    var h = a ? a.getAttribute('href') || '' : '';
+    return (h.match(/product_no=(\d+)/) || h.match(/\/product\/[^/]+\/(\d+)/) || [])[1];
+  }
   // 기린이 품절 상품에 보여주는 품절 아이콘·버튼 (숨김 처리된 것은 제외)
   function visibleSoldout(root) {
     return Array.prototype.some.call(root.querySelectorAll('img[src*="soldout"], img[alt="품절"]'), function (img) {
@@ -288,7 +301,7 @@
     if (!sizes.length) sizes = textSizes;
 
     // 사진: 대표(600x600) + 상세 (버튼·아이콘 이미지는 제외)
-    var big = d.querySelector('.BigImage');
+    var big = d.querySelector('.BigImage, .bigImage');
     var main = abs((big && (big.getAttribute('src') || '')) || get(/var\s+product_image_tiny\s*=\s*'([^']*)'/));
     var detail = [];
     Array.prototype.forEach.call(d.querySelectorAll('#prdDetail img, .cont img'), function (img) {
@@ -299,7 +312,10 @@
     });
     // 품절 아이콘은 상품 정보 칸에서만 확인 (관련 상품 목록의 품절 아이콘에 속지 않게)
     var info = d.querySelector('.detailArea .infoArea') || d.querySelector('.infoArea') || d.querySelector('.detailArea');
-    var allSold = (combos.length > 0 && combos.every(function (c) { return c.soldout; })) || (info ? visibleSoldout(info) : false);
+    var mobileSold = !info && Array.prototype.some.call(d.querySelectorAll('.xans-product-detail img[src*="soldout"], .xans-product-detail img[alt="품절"]'), function (img) {
+      return !img.closest('.displaynone, .xans-product-relation, .xans-product-listnormal, .xans-product-listmain');
+    });
+    var allSold = (combos.length > 0 && combos.every(function (c) { return c.soldout; })) || (info ? visibleSoldout(info) : mobileSold);
 
     return {
       source: 'girin', source_id: 'girin:' + no, source_url: location.origin + '/product/detail.html?product_no=' + no,
@@ -422,6 +438,7 @@
   box.addEventListener('click', function (e) {
     var a = e.target.getAttribute && e.target.getAttribute('data-a');
     if (!a) return;
+    if (a === 'mini') { var m = box.classList.toggle('mini'); $('mini').textContent = m ? '＋' : '－'; return; }
     if (a === 'close') { if (confirm('수집기를 끌까요? (지금 보던 기린 화면으로 돌아갑니다)')) location.href = here().href; return; }
     if (a === 'pickall') { lastSoldSkipped = 0; listNos(D()).forEach(function (n) { if (!known[n]) picked[n] = true; }); paint(); refreshCount(); if (lastSoldSkipped) status('품절 ' + lastSoldSkipped + '개는 빼고 골랐습니다. (필요하면 하나씩 ✓)'); }
     if (a === 'sync') { openTarget().then(function () { status('🔄 ' + SHOP_NAME + '에 이미 있는 기린 상품 ' + Object.keys(known).length + '개를 "등록됨"으로 표시했습니다.'); }).catch(function (e3) { status('⚠️ ' + e3.message); }); }
