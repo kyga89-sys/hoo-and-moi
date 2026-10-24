@@ -1251,10 +1251,13 @@ export default function App() {
   ]));
   useEffect(() => { try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); } catch (e) {} }, [collectBox]);
   useEffect(() => {
+    // 수집기가 이 창을 열 때 붙인 확인 번호 (이 번호로 온 요청에만 대답 → 새로고침 직전 화면이 대신 받는 일 방지)
+    const collectNonce = new URLSearchParams(window.location.search).get('cn') || '';
     const onMsg = (e: MessageEvent) => {
       if (!COLLECT_ORIGIN_RE.test(e.origin) || !e.data || typeof e.data !== 'object') return;
+      if (!collectNonce || e.data.nonce !== collectNonce) return;
       const src = e.source as Window | null;
-      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && src) src.postMessage({ type: 'hm-collector-ready', ids: knownSourceIds() }, e.origin); return; }
+      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && src) src.postMessage({ type: 'hm-collector-ready', nonce: collectNonce, ids: knownSourceIds() }, e.origin); return; }
       if (e.data.type === 'hm-collector-items' && Array.isArray(e.data.items) && isAdminRef.current) {
         const registered = new Set(productsRef.current.map((p: any) => p.source_id).filter(Boolean));
         const items = e.data.items.map(cleanCollected).filter((it: any) => /^girin:\d+$/.test(it.source_id) && it.name && it.main_image && !registered.has(it.source_id));
@@ -1264,7 +1267,9 @@ export default function App() {
           return Array.from(map.values());
         });
         setAdminTab('collect');
-        if (src) src.postMessage({ type: 'hm-collector-ack', count: items.length, ids: items.map((it: any) => it.source_id) }, e.origin);
+        // 받은 수(이미 등록돼 건너뛴 것 포함)와 번호를 알려줌 → 수집기가 "등록됨" 표시
+        const skippedIds = e.data.items.map((it: any) => String(it && it.source_id || '')).filter((id: string) => registered.has(id));
+        if (src) src.postMessage({ type: 'hm-collector-ack', nonce: collectNonce, received: e.data.items.length, ids: items.map((it: any) => it.source_id).concat(skippedIds) }, e.origin);
       }
     };
     window.addEventListener('message', onMsg);

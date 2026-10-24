@@ -339,24 +339,29 @@
   }
 
   // ---------- 쇼핑몰 관리자 창으로 보내기 (이 수집기를 내려준 쇼핑몰만) ----------
-  var target = null, ready = false;
+  var target = null, ready = false, nonce = '', acked = 0;
   var shop = { name: SHOP_NAME, url: SHOP_URL };
   window.addEventListener('message', function (e) {
     if (e.origin !== SHOP_URL || !e.data) return;
-    if (e.data.type === 'hm-collector-ready') {
+    // 새로 연 관리자 화면(확인 번호가 같은 화면)의 대답만 믿음 — 새로고침 직전의 예전 화면은 무시
+    if (e.data.type === 'hm-collector-ready' && e.data.nonce === nonce) {
       ready = true;
       if (Array.isArray(e.data.ids)) { known = {}; e.data.ids.forEach(function (id) { var n = String(id).replace(/^girin:/, ''); if (/^\d+$/.test(n)) known[n] = 1; }); saveKnown(); paint(); refreshCount();
         if (detailNo && known[detailNo]) { $('send-detail').textContent = '이 상품은 이미 등록됨'; $('send-detail').disabled = true; } }
     }
-    if (e.data.type === 'hm-collector-ack' && Array.isArray(e.data.ids)) { e.data.ids.forEach(function (id) { known[String(id).replace(/^girin:/, '')] = 1; }); saveKnown(); paint(); }
+    if (e.data.type === 'hm-collector-ack' && e.data.nonce === nonce) {
+      acked += e.data.received || 0;
+      if (Array.isArray(e.data.ids)) { e.data.ids.forEach(function (id) { known[String(id).replace(/^girin:/, '')] = 1; }); saveKnown(); paint(); }
+    }
   });
   // 쇼핑몰 관리자 창은 버튼을 누른 순간 바로 열어야 브라우저가 막지 않음
   async function openTarget() {
-    ready = false;
-    target = window.open(SHOP_URL + '/?collect=1', 'hm-collector-' + KEY);
+    ready = false; acked = 0;
+    nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    target = window.open(SHOP_URL + '/?collect=1&cn=' + nonce, 'hm-collector-' + KEY);
     if (!target) throw new Error('팝업이 막혔습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 gi-rin.com 팝업을 허용해 주세요.');
     for (var i = 0; i < 120 && !ready; i++) {
-      try { target.postMessage({ type: 'hm-collector-ping' }, SHOP_URL); } catch (e) {}
+      try { target.postMessage({ type: 'hm-collector-ping', nonce: nonce }, SHOP_URL); } catch (e) {}
       await sleep(500);
     }
     if (!ready) throw new Error(SHOP_NAME + ' 관리자 창이 응답하지 않습니다. 그 창에서 관리자 로그인 후 다시 눌러 주세요.');
@@ -367,7 +372,7 @@
     if (busy || !nos.length) return;
     busy = true; refreshCount();
     Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { b.disabled = true; });
-    var items = [], fails = [], skipped = 0;
+    var items = [], fails = [], skipped = 0, sent = 0;
     try {
       await (opened || openTarget());
       // 연결하면서 받은 "이미 등록·수집된 상품"은 빼고 읽기
@@ -379,12 +384,15 @@
         status(label + ' ' + (i + 1) + ' / ' + nos.length + ' 읽는 중…', i / nos.length);
         try { items.push(await fetchDetail(nos[i])); } catch (e) { fails.push(nos[i]); }
         if (items.length >= 20 || i === nos.length - 1) {
-          if (items.length) target.postMessage({ type: 'hm-collector-items', items: items }, shop.url);
+          if (items.length) { sent += items.length; target.postMessage({ type: 'hm-collector-items', nonce: nonce, items: items }, shop.url); }
           items = [];
         }
         await sleep(DELAY);
       }
-      status('✅ ' + (nos.length - fails.length) + '개를 ' + SHOP_NAME + ' 수집함으로 보냈습니다.' + (skipped ? '\n↪ 이미 등록·수집된 ' + skipped + '개는 건너뜀' : '') + (fails.length ? '\n⚠️ 실패 ' + fails.length + '개: ' + fails.slice(0, 5).join(', ') : '') + '\n쇼핑몰 창 › 관리자 › 📥 수집함에서 확인 후 등록하세요.', 1);
+      // 쇼핑몰이 받았다고 확인한 수 기다리기 (최대 10초)
+      for (var w = 0; w < 20 && acked < sent; w++) await sleep(500);
+      if (acked < sent) throw new Error('보낸 ' + sent + '개 중 ' + acked + '개만 수집함에 도착했습니다. 쇼핑몰 창을 닫지 말고 다시 눌러 주세요.');
+      status('✅ ' + acked + '개가 ' + SHOP_NAME + ' 수집함에 도착했습니다.' + (skipped ? '\n↪ 이미 등록·수집된 ' + skipped + '개는 건너뜀' : '') + (fails.length ? '\n⚠️ 실패 ' + fails.length + '개: ' + fails.slice(0, 5).join(', ') : '') + '\n쇼핑몰 창 › 관리자 › 📥 수집함에서 확인 후 등록하세요.', 1);
       picked = {}; paint();
       if (detailNo) { $('send-detail').textContent = '이 상품은 이미 등록됨'; }
     } catch (e) {
