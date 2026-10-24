@@ -1242,21 +1242,29 @@ export default function App() {
   // 📥 기린컴퍼니 수집기 ↔ 관리자 창 (수집기가 이 창을 열고 상품을 보내옴, 관리자 로그인 상태에서만 받음)
   const isAdminRef = useRef(false);
   isAdminRef.current = isAdmin;
+  const collectBoxRef = useRef<any[]>([]);
+  collectBoxRef.current = collectBox;
+  // 이미 등록됐거나 수집함에 있는 기린 상품 → 수집기가 "등록됨"으로 표시하고 다시 안 가져옴
+  const knownSourceIds = () => Array.from(new Set([
+    ...productsRef.current.map((p: any) => p.source_id).filter(Boolean),
+    ...collectBoxRef.current.map((it: any) => it.source_id)
+  ]));
   useEffect(() => { try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); } catch (e) {} }, [collectBox]);
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (!COLLECT_ORIGIN_RE.test(e.origin) || !e.data || typeof e.data !== 'object') return;
       const src = e.source as Window | null;
-      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && src) src.postMessage({ type: 'hm-collector-ready' }, e.origin); return; }
+      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && src) src.postMessage({ type: 'hm-collector-ready', ids: knownSourceIds() }, e.origin); return; }
       if (e.data.type === 'hm-collector-items' && Array.isArray(e.data.items) && isAdminRef.current) {
-        const items = e.data.items.map(cleanCollected).filter((it: any) => /^girin:\d+$/.test(it.source_id) && it.name && it.main_image);
+        const registered = new Set(productsRef.current.map((p: any) => p.source_id).filter(Boolean));
+        const items = e.data.items.map(cleanCollected).filter((it: any) => /^girin:\d+$/.test(it.source_id) && it.name && it.main_image && !registered.has(it.source_id));
         setCollectBox(prev => {
           const map = new Map(prev.map((x: any) => [x.source_id, x]));
           items.forEach((it: any) => map.set(it.source_id, { ...(map.get(it.source_id) || {}), ...it }));
           return Array.from(map.values());
         });
         setAdminTab('collect');
-        if (src) src.postMessage({ type: 'hm-collector-ack', count: items.length }, e.origin);
+        if (src) src.postMessage({ type: 'hm-collector-ack', count: items.length, ids: items.map((it: any) => it.source_id) }, e.origin);
       }
     };
     window.addEventListener('message', onMsg);
