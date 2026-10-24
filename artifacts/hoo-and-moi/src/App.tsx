@@ -37,7 +37,11 @@ const compressImage = async (file: File, maxSide = 1280, quality = 0.82): Promis
   if (!file.type.startsWith('image/') || file.type === 'image/gif') return file;
   try {
     const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    // 세로로 아주 긴 상세 사진은 폭만 600px로 (긴 쪽을 1280에 맞추면 폭이 50px 정도로 깨짐)
+    // 휴대폰 캔버스 한도(약 1,600만 화소)를 넘지 않게
+    const tall = bmp.height > bmp.width * 2;
+    let scale = tall ? Math.min(1, 600 / bmp.width) : Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    scale = Math.min(scale, Math.sqrt(16_000_000 / (bmp.width * bmp.height)));
     const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
@@ -1268,7 +1272,7 @@ export default function App() {
       if (!COLLECT_ORIGIN_RE.test(e.origin) || !e.data || typeof e.data !== 'object') return;
       if (!collectNonce || e.data.nonce !== collectNonce) return;
       const src = e.source as Window | null;
-      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && adminProductsReadyRef.current && src) src.postMessage({ type: 'hm-collector-ready', nonce: collectNonce, ids: knownSourceIds() }, e.origin); return; }
+      if (e.data.type === 'hm-collector-ping') { if (isAdminRef.current && adminProductsReadyRef.current && src) src.postMessage({ type: 'hm-collector-ready', nonce: collectNonce, ids: knownSourceIds(), reg: productsRef.current.map((p: any) => p.source_id).filter(Boolean) }, e.origin); return; }
       if (e.data.type === 'hm-collector-items' && Array.isArray(e.data.items) && isAdminRef.current) {
         const registered = new Set(productsRef.current.map((p: any) => p.source_id).filter(Boolean));
         const items = e.data.items.map(cleanCollected).filter((it: any) => /^girin:\d+$/.test(it.source_id) && it.name && it.main_image && !registered.has(it.source_id));
@@ -2538,7 +2542,7 @@ export default function App() {
                         <p style={{ margin: '4px 0 0', color: THEME.subText }}>· 아이폰에서 수집한 상품은 아이폰 사파리의 수집함에 들어가요. 등록도 아이폰에서 해 주세요. (사파리에서 이 관리자 화면에 로그인되어 있어야 해요)</p>
                       </>);
                     })()}
-                    <p style={{ margin: '10px 0 0', color: THEME.subText }}>사용법: 사진 왼쪽 위 ✓ 로 고른 뒤 [선택 수집] · [이 페이지 전체 수집] · [이 분류 여러 페이지 수집](한 번에 최대 50페이지) · 상품 화면은 [이 상품 수집] → 이 관리자 창이 열리며 수집함으로 들어옵니다.</p>
+                    <p style={{ margin: '10px 0 0', color: THEME.subText }}>사용법: 사진 왼쪽 위 ✓ 로 고르거나 [전체 선택] → [선택한 N개 수집] · [이 분류 여러 페이지 수집](한 번에 최대 50페이지) · 상품 화면은 [이 상품 수집] → 다 모았으면 [수집함으로 이동]을 누르면 이 관리자 창이 열리며 한 번에 들어옵니다.</p>
                   </div>
                 </details>
 

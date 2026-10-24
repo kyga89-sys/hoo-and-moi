@@ -24,23 +24,41 @@
   var known = {};
   try { (JSON.parse(localStorage.getItem('girin_known_' + KEY) || '[]') || []).forEach(function (n) { known[n] = 1; }); } catch (e) {}
   function saveKnown() { try { localStorage.setItem('girin_known_' + KEY, JSON.stringify(Object.keys(known))); } catch (e) {} }
+  // 담아 둔 상품: 수집할 때는 기린 쪽에만 모아 두고, [수집함으로 이동]을 누를 때 한 번에 보냄 (팝업 차단 없음)
+  var pending = {};
+  try { pending = JSON.parse(localStorage.getItem('girin_pending_' + KEY) || '{}') || {}; } catch (e) { pending = {}; }
+  function savePending() { try { localStorage.setItem('girin_pending_' + KEY, JSON.stringify(pending)); return true; } catch (e) { return false; } }
+  function pendingCount() { return Object.keys(pending).length; }
+  var registered = {}; // 쇼핑몰에 이미 등록된 상품 (수집함에 있는 것과 구분해서 안내)
 
   // ---------- 화면 ----------
   var css = document.createElement('style');
   css.textContent = [
-    '#gcl{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:300px;background:#fff;border:2px solid #333;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.25);font:13px/1.45 "Malgun Gothic",sans-serif;color:#222}',
-    '#gcl .h{display:flex;align-items:center;justify-content:space-between;background:#333;color:#fff;padding:9px 12px;border-radius:11px 11px 0 0;font-weight:700}',
-    '#gcl .b{padding:10px 12px;display:flex;flex-direction:column;gap:7px}',
-    '#gcl button{height:34px;border-radius:8px;border:1px solid #ccc;background:#fff;font:700 13px "Malgun Gothic";cursor:pointer}',
+    '#gcl{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:300px;background:#fff;border-radius:16px;box-shadow:0 10px 36px rgba(0,0,0,.28);font:13px/1.45 "Malgun Gothic",-apple-system,sans-serif;color:#222;overflow:hidden}',
+    '#gcl .h{display:flex;align-items:center;justify-content:space-between;background:#2b2b2b;color:#fff;padding:10px 12px;font-weight:700}',
+    '#gcl .h .x{cursor:pointer;padding:0 7px;opacity:.85}',
+    '#gcl .b{padding:12px;display:flex;flex-direction:column;gap:8px}',
+    '#gcl .to{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#666}',
+    '#gcl .cnt{background:#F06A7D;color:#fff;border-radius:999px;padding:1px 9px;font-weight:700;font-size:12px}',
+    '#gcl .lbl{font-size:11px;color:#999;font-weight:700;margin-bottom:4px}',
+    '#gcl button{width:100%;height:38px;border-radius:10px;border:1px solid #ddd;background:#fff;color:#222;font:700 13px "Malgun Gothic",-apple-system,sans-serif;cursor:pointer}',
     '#gcl button.p{background:#F06A7D;border-color:#F06A7D;color:#fff}',
-    '#gcl button:disabled{opacity:.45;cursor:default}',
-    '#gcl select{height:32px;border-radius:8px;border:1px solid #ccc;font:13px "Malgun Gothic";padding:0 6px}',
+    '#gcl button.d{background:#2b2b2b;border-color:#2b2b2b;color:#fff}',
+    '#gcl button:disabled{opacity:.4;cursor:default}',
     '#gcl .row{display:grid;grid-template-columns:1fr 1fr;gap:6px}',
-    '#gcl .st{font-size:12px;color:#555;min-height:18px;white-space:pre-line}',
-    '#gcl .bar{height:6px;background:#eee;border-radius:3px;overflow:hidden}#gcl .bar i{display:block;height:100%;width:0;background:#F06A7D;transition:width .2s}',
+    '#gcl .sep{height:1px;background:#eee;margin:2px 0}',
+    '#gcl .st{font-size:12px;color:#555;min-height:16px;white-space:pre-line}',
+    '#gcl .bar{height:5px;background:#eee;border-radius:3px;overflow:hidden}#gcl .bar i{display:block;height:100%;width:0;background:#F06A7D;transition:width .2s}',
     '#gcl-frame{position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483640;background:#fff}',
     '#gcl.mini .b{display:none}',
-    '@media (max-width:600px){#gcl{left:8px;right:8px!important;bottom:8px;width:auto;font-size:14px}#gcl button{height:42px;font-size:14px}#gcl .b{max-height:52vh;overflow:auto}}'
+    '#gcl-modal{position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px}',
+    '#gcl-modal .c{background:#fff;border-radius:18px;width:100%;max-width:340px;padding:22px 18px 16px;text-align:center;font:14px/1.5 "Malgun Gothic",-apple-system,sans-serif;color:#222;box-shadow:0 12px 40px rgba(0,0,0,.3)}',
+    '#gcl-modal .i{font-size:30px}',
+    '#gcl-modal .t{font-size:17px;font-weight:800;margin:4px 0}',
+    '#gcl-modal .s{font-size:13px;color:#777;margin-bottom:14px;white-space:pre-line}',
+    '#gcl-modal button{display:block;width:100%;height:46px;margin-top:8px;border-radius:12px;border:1px solid #ddd;background:#fff;color:#333;font:700 15px "Malgun Gothic",-apple-system,sans-serif;cursor:pointer}',
+    '#gcl-modal button.p{background:#F06A7D;border-color:#F06A7D;color:#fff}',
+    '@media (max-width:600px){#gcl{left:8px;right:8px!important;bottom:8px;width:auto;font-size:14px}#gcl button{height:44px;font-size:14px}#gcl .b{max-height:55vh;overflow:auto}#gcl-modal{align-items:flex-end;padding:0}#gcl-modal .c{max-width:none;border-radius:20px 20px 0 0;padding-bottom:26px}}'
   ].join('\n');
   document.head.appendChild(css);
   var CARD_CSS = [
@@ -58,15 +76,15 @@
   if (document.querySelector('[id^="gcl"][data-shop]')) box.style.right = '330px'; // 다른 가게 수집기와 겹치지 않게
   box.setAttribute('data-shop', KEY);
   box.innerHTML =
-    '<div class="h"><span>🛒 ' + SHOP_NAME + ' 상품 수집기</span><span><span style="cursor:pointer;padding:0 10px" data-a="mini">－</span><span style="cursor:pointer;padding:0 4px" data-a="close">✕</span></span></div>' +
+    '<div class="h"><span>🛒 ' + SHOP_NAME + ' 상품 수집기</span><span><span class="x" data-a="mini">－</span><span class="x" data-a="close">✕</span></span></div>' +
     '<div class="b">' +
-    '<div style="font-size:12px;color:#555">보내는 곳: <b>' + SHOP_NAME + '</b> 관리자 › 📥 수집함</div>' +
-    '<button data-a="sync">🔄 이미 등록된 상품 확인</button>' +
-    '<div class="row"><button data-a="pickall">이 페이지 전체 선택</button><button data-a="clear">선택 해제</button></div>' +
+    '<div class="to"><span>보낼 곳: <b>' + SHOP_NAME + '</b> 수집함</span><span class="cnt">담은 0개</span></div>' +
+    '<div data-sec="list"><div class="lbl">상품 고르기 (사진 왼쪽 위 ✓)</div><div class="row"><button data-a="pickall">전체 선택</button><button data-a="clear">선택 해제</button></div></div>' +
     '<button class="p" data-a="send-picked">✅ 선택한 0개 수집</button>' +
-    '<button data-a="send-page">이 페이지 전체 수집</button>' +
-    '<button data-a="send-cate">이 분류 여러 페이지 수집</button>' +
-    '<button data-a="send-detail" style="display:none">이 상품 수집</button>' +
+    '<button class="p" data-a="send-detail" style="display:none">📦 이 상품 수집</button>' +
+    '<button data-a="send-cate">📚 이 분류 여러 페이지 수집</button>' +
+    '<div class="sep"></div>' +
+    '<button class="d" data-a="go">📤 ' + SHOP_NAME + ' 수집함으로 이동</button>' +
     '<div class="bar"><i></i></div><div class="st"></div>' +
     '</div>';
   document.body.appendChild(box);
@@ -95,11 +113,10 @@
     }, true);
     try { history.replaceState(null, '', here().href); document.title = FD.title; } catch (e) {}
     detailNo = noFromLoc(here());
-    $('send-detail').style.display = detailNo ? '' : 'none';
-    $('send-detail').textContent = detailNo ? (known[detailNo] ? '이 상품은 이미 등록됨' : '📦 이 상품 수집') : '이 상품 수집';
-    $('send-detail').disabled = !!(detailNo && known[detailNo]);
+    refreshDetail();
     var hasCards = cards().length > 0;
-    ['pickall', 'clear', 'send-page'].forEach(function (k) { $(k).style.display = hasCards ? '' : 'none'; });
+    box.querySelector('[data-sec="list"]').style.display = hasCards ? '' : 'none';
+    $('send-picked').style.display = hasCards ? '' : 'none';
     $('send-cate').style.display = /cate_no=\d+/.test(here().search) ? '' : 'none';
     if (frameObs) frameObs.disconnect();
     var pend = 0;
@@ -110,7 +127,7 @@
     });
     frameObs.observe(FD.body, { childList: true, subtree: true });
     decorate();
-    status(detailNo ? (known[detailNo] ? '이 상품은 이미 ' + SHOP_NAME + '에 있습니다.' : '[📦 이 상품 수집]을 누르면 수집함으로 보냅니다.') : (hasCards ? '사진 왼쪽 위 ✓ 로 고르세요. 다른 페이지로 가도 고른 상품은 유지됩니다.' : '분류 목록이나 상품 상세 화면으로 이동하세요.'));
+    status(detailNo ? (known[detailNo] ? '이미 등록한 상품입니다.' : '') : (hasCards ? '사진 왼쪽 위 ✓ 로 고르세요. 다른 페이지로 가도 고른 상품은 유지됩니다.' : '분류 목록이나 상품 화면으로 이동하세요.'));
   });
 
   // ---------- 목록 카드에 체크박스 ----------
@@ -144,6 +161,17 @@
     var n = Object.keys(picked).length, t = '✅ 선택한 ' + n + '개 수집', b = $('send-picked');
     if (b.textContent !== t) b.textContent = t;
     b.disabled = !n || busy;
+    var m = pendingCount(), c = box.querySelector('.cnt'), g = $('go');
+    c.textContent = '담은 ' + m + '개';
+    g.textContent = '📤 ' + SHOP_NAME + ' 수집함으로 이동' + (m ? ' (' + m + '개 보내기)' : '');
+    g.disabled = busy;
+  }
+  function refreshDetail() {
+    var d = $('send-detail');
+    d.style.display = detailNo ? '' : 'none';
+    if (!detailNo) return;
+    d.textContent = known[detailNo] ? '이미 등록한 상품입니다' : pending[detailNo] ? '이미 담은 상품입니다' : '📦 이 상품 수집';
+    d.disabled = !!(known[detailNo] || pending[detailNo]) || busy;
   }
   function decorate() {
     cards().forEach(function (li) {
@@ -155,7 +183,7 @@
       c.className = 'gcl-chk'; c.textContent = '✓';
       c.onclick = function (e) {
         e.preventDefault(); e.stopPropagation();
-        if (known[no]) return;
+        if (known[no] || pending[no]) return;
         if (picked[no]) delete picked[no]; else picked[no] = true;
         paint(); refreshCount();
       };
@@ -165,14 +193,14 @@
   }
   function paint() {
     cards().forEach(function (li) {
-      var no = noOf(li), done = !!known[no];
+      var no = noOf(li), held = !!pending[no] && !known[no], done = !!known[no] || held;
       if (soldCard[no] == null) soldCard[no] = visibleSoldout(li);
       if (done) delete picked[no];
       var on = !!picked[no];
       var c = li.querySelector('.gcl-chk');
       if (c) {
         c.classList.toggle('on', on); c.classList.toggle('done', done); c.classList.toggle('sold', !done && !on && soldCard[no]);
-        var t = done ? '등록됨' : (on ? '✓' : (soldCard[no] ? '품절' : '✓'));
+        var t = done ? (held ? '담음' : '등록됨') : (on ? '✓' : (soldCard[no] ? '품절' : '✓'));
         if (c.textContent !== t) c.textContent = t;
       }
       var h = li.querySelector('.gcl-host'); if (h) { h.classList.toggle('gcl-on', on); h.classList.toggle('gcl-done', done); }
@@ -365,17 +393,39 @@
     return nos;
   }
 
+  // ---------- 안내창 (장바구니처럼: 수집함으로 이동 / 계속 수집) ----------
+  function modal(icon, title, sub, buttons) {
+    var old = document.getElementById('gcl-modal'); if (old) old.remove();
+    var m = document.createElement('div'); m.id = 'gcl-modal';
+    m.innerHTML = '<div class="c"><div class="i">' + icon + '</div><div class="t"></div><div class="s"></div></div>';
+    m.querySelector('.t').textContent = title; m.querySelector('.s').textContent = sub || '';
+    buttons.forEach(function (bt) {
+      var el = document.createElement('button'); el.textContent = bt.label; if (bt.primary) el.className = 'p';
+      el.onclick = function () { m.remove(); if (bt.fn) bt.fn(); };
+      m.querySelector('.c').appendChild(el);
+    });
+    m.addEventListener('click', function (e) { if (e.target === m) m.remove(); });
+    document.body.appendChild(m);
+  }
+  function askGo(title, sub) {
+    modal('🛒', title, sub, [
+      { label: SHOP_NAME + ' 수집함으로 이동', primary: true, fn: sendPending },
+      { label: '계속 수집하기' }
+    ]);
+  }
+
   // ---------- 쇼핑몰 관리자 창으로 보내기 (이 수집기를 내려준 쇼핑몰만) ----------
   var target = null, ready = false, nonce = '', acked = 0, boxFull = false, rejected = 0;
-  var shop = { name: SHOP_NAME, url: SHOP_URL };
   window.addEventListener('message', function (e) {
     if (e.origin !== SHOP_URL || !e.data) return;
     // 새로 연 관리자 화면(확인 번호가 같은 화면)의 대답만 믿음 — 새로고침 직전의 예전 화면은 무시
     if (e.data.type === 'hm-collector-ready' && e.data.nonce === nonce) {
       ready = true;
-      if (Array.isArray(e.data.ids)) { known = {}; e.data.ids.forEach(function (id) { var n = String(id).replace(/^girin:/, ''); if (/^\d+$/.test(n)) known[n] = 1; }); saveKnown(); paint(); refreshCount();
-        // 쇼핑몰에서 지운 상품은 다시 수집할 수 있게 버튼을 되살림
-        if (detailNo) { $('send-detail').textContent = known[detailNo] ? '이 상품은 이미 등록됨' : '📦 이 상품 수집'; $('send-detail').disabled = !!known[detailNo]; } }
+      if (Array.isArray(e.data.ids)) {
+        known = {}; e.data.ids.forEach(function (id) { var n = String(id).replace(/^girin:/, ''); if (/^\d+$/.test(n)) known[n] = 1; });
+        registered = {}; (e.data.reg || []).forEach(function (id) { registered[String(id).replace(/^girin:/, '')] = 1; });
+        saveKnown(); paint(); refreshCount(); refreshDetail();
+      }
     }
     if (e.data.type === 'hm-collector-ack' && e.data.nonce === nonce) {
       acked += e.data.received || 0;
@@ -384,68 +434,101 @@
       if (Array.isArray(e.data.ids)) { e.data.ids.forEach(function (id) { known[String(id).replace(/^girin:/, '')] = 1; }); saveKnown(); paint(); }
     }
   });
-  // 쇼핑몰 관리자 창은 버튼을 누른 순간 바로 열어야 브라우저가 막지 않음
+  // 쇼핑몰 창은 [수집함으로 이동]을 누른 바로 그때만 엶 → 브라우저 팝업 차단에 안 걸림
   async function openTarget() {
     ready = false; acked = 0; boxFull = false; rejected = 0;
     nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
     target = window.open(SHOP_URL + '/?collect=1&cn=' + nonce, 'hm-collector-' + KEY);
-    if (!target) throw new Error('팝업이 막혔습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 gi-rin.com 팝업을 허용해 주세요.');
+    if (!target) throw new Error('쇼핑몰 창을 열지 못했습니다. 다시 한 번 눌러 주세요.');
     for (var i = 0; i < 120 && !ready; i++) {
       try { target.postMessage({ type: 'hm-collector-ping', nonce: nonce }, SHOP_URL); } catch (e) {}
       await sleep(500);
     }
-    if (!ready) throw new Error(SHOP_NAME + ' 관리자 창이 응답하지 않습니다. 그 창에서 관리자 로그인 후 다시 눌러 주세요.');
-    return shop;
+    if (!ready) throw new Error(SHOP_NAME + ' 관리자 창이 응답하지 않습니다. 그 창에서 관리자 로그인 후 다시 [수집함으로 이동]을 눌러 주세요. (담은 상품은 그대로 있어요)');
   }
 
-  async function collect(nos, label, opened) {
-    if (busy || !nos.length) return;
-    busy = true; refreshCount();
-    Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { b.disabled = true; });
-    var items = [], fails = [], skipped = 0, sent = 0;
+  function setBusy(v) {
+    busy = v;
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { b.disabled = v; });
+    if (!v) { refreshCount(); refreshDetail(); }
+  }
+
+  // 담은 상품을 쇼핑몰 수집함으로 보냄
+  async function sendPending() {
+    if (busy) return;
+    var ids = Object.keys(pending);
+    setBusy(true);
     try {
-      await (opened || openTarget());
-      // 연결하면서 받은 "이미 등록·수집된 상품"은 빼고 읽기
-      var before = nos.length;
-      nos = nos.filter(function (n) { return !known[n]; });
-      skipped = before - nos.length;
-      if (!nos.length) { status('이미 모두 등록(또는 수집함에 있는) 상품입니다. 건너뛴 상품 ' + skipped + '개', 1); return; }
-      for (var i = 0; i < nos.length; i++) {
-        status(label + ' ' + (i + 1) + ' / ' + nos.length + ' 읽는 중…', i / nos.length);
-        try { items.push(await fetchDetail(nos[i])); } catch (e) { fails.push(nos[i]); }
-        if (items.length >= 20 || i === nos.length - 1) {
-          if (items.length) { sent += items.length; target.postMessage({ type: 'hm-collector-items', nonce: nonce, items: items }, shop.url); }
-          items = [];
-        }
-        await sleep(DELAY);
+      status(SHOP_NAME + ' 수집함 여는 중…', 0);
+      await openTarget();
+      if (!ids.length) { status(SHOP_NAME + ' 수집함을 열었습니다.', 1); return; }
+      // 이미 등록했거나 이미 수집함에 있는 상품은 빼고 보냄
+      var reg = ids.filter(function (n) { return registered[n]; });
+      var inbox = ids.filter(function (n) { return known[n] && !registered[n]; });
+      var send = ids.filter(function (n) { return !known[n]; });
+      var sent = 0;
+      for (var i = 0; i < send.length; i += 20) {
+        var chunk = send.slice(i, i + 20).map(function (n) { return pending[n]; });
+        sent += chunk.length;
+        target.postMessage({ type: 'hm-collector-items', nonce: nonce, items: chunk }, SHOP_URL);
+        status('보내는 중… ' + Math.min(i + 20, send.length) + ' / ' + send.length, Math.min(i + 20, send.length) / send.length);
       }
-      // 쇼핑몰이 받았다고 확인한 수 기다리기 (최대 10초)
       for (var w = 0; w < 20 && acked < sent && !boxFull; w++) await sleep(500);
-      if (boxFull) throw new Error(SHOP_NAME + ' 수집함이 가득 찼습니다. 수집함의 상품을 먼저 등록하거나 지운 뒤 다시 수집해 주세요.');
-      if (acked < sent) throw new Error('보낸 ' + sent + '개 중 ' + acked + '개만 수집함에 도착했습니다. 쇼핑몰 창을 닫지 말고 다시 눌러 주세요.');
-      status('✅ ' + (acked - rejected) + '개가 ' + SHOP_NAME + ' 수집함에 도착했습니다.' + (rejected ? '\n⚠️ 대표 사진·이름이 없어 ' + rejected + '개는 빠짐' : '') + (skipped ? '\n↪ 이미 등록·수집된 ' + skipped + '개는 건너뜀' : '') + (fails.length ? '\n⚠️ 실패 ' + fails.length + '개: ' + fails.slice(0, 5).join(', ') : '') + '\n쇼핑몰 창 › 관리자 › 📥 수집함에서 확인 후 등록하세요.', 1);
-      picked = {}; paint();
-      if (detailNo) { $('send-detail').textContent = '이 상품은 이미 등록됨'; }
+      if (boxFull) throw new Error(SHOP_NAME + ' 수집함이 가득 찼습니다. 수집함의 상품을 먼저 등록하거나 지운 뒤 다시 보내 주세요. (담은 상품은 그대로 있어요)');
+      if (acked < sent) throw new Error('보낸 ' + sent + '개 중 ' + acked + '개만 도착했습니다. 쇼핑몰 창을 닫지 말고 다시 [수집함으로 이동]을 눌러 주세요.');
+      ids.forEach(function (n) { delete pending[n]; }); savePending(); paint();
+      status('✅ ' + (sent - rejected) + '개를 ' + SHOP_NAME + ' 수집함에 보냈습니다.' +
+        (reg.length ? '\n↪ 이미 등록한 상품 ' + reg.length + '개는 뺐어요.' : '') +
+        (inbox.length ? '\n↪ 이미 수집함에 있는 ' + inbox.length + '개는 뺐어요.' : '') +
+        (rejected ? '\n⚠️ 대표 사진·이름이 없어 ' + rejected + '개는 빠졌어요.' : ''), 1);
     } catch (e) {
       status('⚠️ ' + e.message, 0);
-    } finally {
-      busy = false;
-      Array.prototype.forEach.call(box.querySelectorAll('button'), function (b) { b.disabled = false; });
-      refreshCount();
+    } finally { setBusy(false); }
+  }
+
+  // 상품을 읽어서 담기 (쇼핑몰 창은 열지 않음)
+  async function collect(nos) {
+    if (busy || !nos.length) return;
+    var reg = nos.filter(function (n) { return known[n]; });
+    var held = nos.filter(function (n) { return !known[n] && pending[n]; });
+    nos = nos.filter(function (n) { return !known[n] && !pending[n]; });
+    if (!nos.length) {
+      picked = {}; paint(); refreshCount();
+      return askGo(reg.length ? '이미 등록한 상품입니다' : '이미 담은 상품입니다',
+        (reg.length ? '이미 ' + SHOP_NAME + '에 등록(또는 수집)한 상품 ' + reg.length + '개' : '') + (held.length ? (reg.length ? '\n' : '') + '이미 담아 둔 상품 ' + held.length + '개' : '') + '\n담은 상품 ' + pendingCount() + '개');
     }
+    setBusy(true);
+    var got = 0, fails = [];
+    try {
+      for (var i = 0; i < nos.length; i++) {
+        status('상품 읽는 중… ' + (i + 1) + ' / ' + nos.length, i / nos.length);
+        try { var it = await fetchDetail(nos[i]); pending[nos[i]] = it; got++; } catch (e) { fails.push(nos[i]); }
+        if (i % 10 === 9) savePending();
+        await sleep(DELAY);
+      }
+      if (!savePending()) throw new Error('담을 공간이 가득 찼습니다. [수집함으로 이동]으로 먼저 보내 주세요.');
+      picked = {}; paint();
+      status('', 1);
+      askGo('🛒 ' + got + '개를 수집했어요',
+        '담은 상품 모두 ' + pendingCount() + '개' +
+        (reg.length ? '\n이미 등록한 상품 ' + reg.length + '개는 뺐어요' : '') +
+        (held.length ? '\n이미 담은 상품 ' + held.length + '개는 뺐어요' : '') +
+        (fails.length ? '\n⚠️ 읽지 못한 상품 ' + fails.length + '개' : ''));
+    } catch (e) {
+      status('⚠️ ' + e.message, 0);
+    } finally { setBusy(false); }
   }
 
   box.addEventListener('click', function (e) {
     var a = e.target.getAttribute && e.target.getAttribute('data-a');
     if (!a) return;
     if (a === 'mini') { var m = box.classList.toggle('mini'); $('mini').textContent = m ? '＋' : '－'; return; }
-    if (a === 'close') { if (confirm('수집기를 끌까요? (지금 보던 기린 화면으로 돌아갑니다)')) location.href = here().href; return; }
-    if (a === 'pickall') { lastSoldSkipped = 0; listNos(D()).forEach(function (n) { if (!known[n]) picked[n] = true; }); paint(); refreshCount(); if (lastSoldSkipped) status('품절 ' + lastSoldSkipped + '개는 빼고 골랐습니다. (필요하면 하나씩 ✓)'); }
-    if (a === 'sync') { openTarget().then(function () { status('🔄 ' + SHOP_NAME + '에 이미 있는 기린 상품 ' + Object.keys(known).length + '개를 "등록됨"으로 표시했습니다.'); }).catch(function (e3) { status('⚠️ ' + e3.message); }); }
-    if (a === 'clear') { picked = {}; paint(); refreshCount(); }
-    if (a === 'send-picked') collect(Object.keys(picked), '선택');
-    if (a === 'send-page') { lastSoldSkipped = 0; var pn = listNos(D()); collect(pn, '이 페이지' + (lastSoldSkipped ? '(품절 ' + lastSoldSkipped + '개 제외)' : '')); }
-    if (a === 'send-detail' && detailNo) collect([detailNo], '이 상품');
+    if (a === 'close') { if (confirm('수집기를 끌까요? (담은 상품은 그대로 남아요)')) location.href = here().href; return; }
+    if (a === 'pickall') { lastSoldSkipped = 0; listNos(D()).forEach(function (n) { if (!known[n] && !pending[n]) picked[n] = true; }); paint(); refreshCount(); status(lastSoldSkipped ? '품절 ' + lastSoldSkipped + '개는 빼고 골랐습니다. (필요하면 하나씩 ✓)' : ''); }
+    if (a === 'clear') { picked = {}; paint(); refreshCount(); status(''); }
+    if (a === 'send-picked') collect(Object.keys(picked));
+    if (a === 'send-detail' && detailNo) collect([detailNo]);
+    if (a === 'go') sendPending();
     if (a === 'send-cate') {
       var cur = +((here().search.match(/[?&]page=(\d+)/) || [])[1] || 1), lp = lastPage(), last = Math.max(lp, cur);
       // 모바일 화면은 페이지 번호 대신 [더보기]라 끝을 모름 → 빈 페이지가 나올 때까지 읽음
@@ -456,16 +539,15 @@
       if (ans === null) return;
       var cnt = Math.min(parseInt(ans, 10) || 0, left, MAX_PAGES);
       if (cnt < 1) return status('⚠️ 페이지 수를 숫자로 적어 주세요.');
-      var opened = openTarget();
-      opened.catch(function () {});
+      setBusy(true);
       allCategoryNos(cur, cnt).then(function (nos) {
+        setBusy(false);
         if (!nos.length) return status(lastSoldSkipped ? cur + '~' + (cur + cnt - 1) + '페이지 상품 ' + lastSoldSkipped + '개가 모두 품절이라 수집할 상품이 없습니다.' : '⚠️ 이 분류에서 상품을 찾지 못했습니다.');
-        // 페이지를 읽는 동안 쇼핑몰에서 받아 둔 "이미 등록됨" 목록으로 미리 빼고 물어봄
-        var fresh = nos.filter(function (n) { return !known[n]; });
-        if (!fresh.length) return status('이미 모두 등록(또는 수집함에 있는) 상품입니다. 건너뛴 상품 ' + nos.length + '개');
-        if (confirm(cur + '~' + (cur + cnt - 1) + '페이지 새 상품 ' + fresh.length + '개를 수집할까요?' + (nos.length > fresh.length ? ' (이미 있는 ' + (nos.length - fresh.length) + '개 제외)' : '') + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(fresh.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 ' + cur + '~' + (cur + cnt - 1) + '페이지', opened);
+        var fresh = nos.filter(function (n) { return !known[n] && !pending[n]; });
+        if (!fresh.length) return collect(nos);
+        if (confirm(cur + '~' + (cur + cnt - 1) + '페이지 새 상품 ' + fresh.length + '개를 수집할까요?' + (nos.length > fresh.length ? ' (이미 등록·담은 ' + (nos.length - fresh.length) + '개 제외)' : '') + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(fresh.length * (DELAY + 400) / 60000) + '분)')) collect(nos);
         else status('취소했습니다.');
-      }).catch(function (e2) { status('⚠️ ' + e2.message); });
+      }).catch(function (e2) { setBusy(false); status('⚠️ ' + e2.message); });
     }
   });
 
@@ -474,5 +556,6 @@
     parseDetail: parseDetail, fetchDetail: fetchDetail
   };
   window.__girinCollector = api; // 시험용
-  status('기린 화면 불러오는 중…' + (Object.keys(known).length ? '' : '\n처음이면 [🔄 이미 등록된 상품 확인]을 먼저 눌러 주세요.'));
+  refreshCount();
+  status('기린 화면 불러오는 중…');
 })();
