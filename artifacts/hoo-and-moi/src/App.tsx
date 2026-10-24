@@ -1317,6 +1317,12 @@ export default function App() {
     const list = collectBox.filter((it: any) => ids.includes(it.source_id) && !existingSourceIds.has(it.source_id));
     if (!list.length) return alert("등록할 상품이 없습니다. (이미 등록된 상품은 건너뜁니다)");
     if (usageInfo && list.length > usageInfo.collectMore) return alert(`저장 공간이 부족합니다. 지금은 약 ${usageInfo.collectMore}개까지 더 등록할 수 있어요.`);
+    // 금액 확인: 0원 상품은 등록 막고, 원가보다 싸게 파는 상품은 한 번 더 물어봄
+    const priceOf = (it: any) => it.price || collectPrice(it, collectRule, collectRate);
+    const zero = list.filter((it: any) => !(priceOf(it) > 0));
+    if (zero.length) return alert(`판매가가 0원인 상품이 ${zero.length}개 있습니다: ${zero.slice(0, 3).map((it: any) => it.name).join(', ')}${zero.length > 3 ? ' …' : ''}\n판매가를 적은 뒤 다시 등록해 주세요. (기린에 로그인하지 않은 채 수집하면 금액이 비어 올 수 있어요)`);
+    const below = list.filter((it: any) => it.cost_price > 0 && priceOf(it) < it.cost_price);
+    if (below.length && !window.confirm(`판매가가 원가보다 낮은 상품이 ${below.length}개 있습니다: ${below.slice(0, 3).map((it: any) => `${it.name}(판매 ${priceOf(it).toLocaleString()} < 원가 ${it.cost_price.toLocaleString()})`).join(', ')}\n그래도 등록할까요?`)) return;
     if (!window.confirm(`${list.length}개 상품을 등록할까요?`)) return;
     setIsRegistering(true);
     try {
