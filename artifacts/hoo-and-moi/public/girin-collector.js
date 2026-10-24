@@ -29,7 +29,9 @@
   try { pending = JSON.parse(localStorage.getItem('girin_pending_' + KEY) || '{}') || {}; } catch (e) { pending = {}; }
   function savePending() { try { localStorage.setItem('girin_pending_' + KEY, JSON.stringify(pending)); return true; } catch (e) { return false; } }
   function pendingCount() { return Object.keys(pending).length; }
-  var registered = {}; // 쇼핑몰에 이미 등록된 상품 (수집함에 있는 것과 구분해서 안내)
+  // 쇼핑몰에 이미 등록된 상품 → 다시 수집 못 하게 막음 (수집함에만 있는 상품은 다시 수집 가능)
+  var registered = {};
+  try { (JSON.parse(localStorage.getItem('girin_reg_' + KEY) || '[]') || []).forEach(function (n) { registered[n] = 1; }); } catch (e) {}
 
   // ---------- 화면 ----------
   var css = document.createElement('style');
@@ -127,7 +129,7 @@
     });
     frameObs.observe(FD.body, { childList: true, subtree: true });
     decorate();
-    status(detailNo ? (known[detailNo] ? '이미 등록한 상품입니다.' : '') : (hasCards ? '사진 왼쪽 위 ✓ 로 고르세요. 다른 페이지로 가도 고른 상품은 유지됩니다.' : '분류 목록이나 상품 화면으로 이동하세요.'));
+    status(detailNo ? (registered[detailNo] ? '이미 등록한 상품입니다.' : '') : (hasCards ? '사진 왼쪽 위 ✓ 로 고르세요. 다른 페이지로 가도 고른 상품은 유지됩니다.' : '분류 목록이나 상품 화면으로 이동하세요.'));
   });
 
   // ---------- 목록 카드에 체크박스 ----------
@@ -170,8 +172,8 @@
     var d = $('send-detail');
     d.style.display = detailNo ? '' : 'none';
     if (!detailNo) return;
-    d.textContent = known[detailNo] ? '이미 등록한 상품입니다' : pending[detailNo] ? '이미 담은 상품입니다' : '📦 이 상품 수집';
-    d.disabled = !!(known[detailNo] || pending[detailNo]) || busy;
+    d.textContent = registered[detailNo] ? '이미 등록한 상품입니다' : pending[detailNo] ? '이미 담은 상품입니다' : '📦 이 상품 수집';
+    d.disabled = !!(registered[detailNo] || pending[detailNo]) || busy;
   }
   function decorate() {
     cards().forEach(function (li) {
@@ -183,7 +185,7 @@
       c.className = 'gcl-chk'; c.textContent = '✓';
       c.onclick = function (e) {
         e.preventDefault(); e.stopPropagation();
-        if (known[no] || pending[no]) return;
+        if (registered[no] || pending[no]) return;
         if (picked[no]) delete picked[no]; else picked[no] = true;
         paint(); refreshCount();
       };
@@ -193,7 +195,7 @@
   }
   function paint() {
     cards().forEach(function (li) {
-      var no = noOf(li), held = !!pending[no] && !known[no], done = !!known[no] || held;
+      var no = noOf(li), held = !!pending[no] && !registered[no], done = !!registered[no] || held;
       if (soldCard[no] == null) soldCard[no] = visibleSoldout(li);
       if (done) delete picked[no];
       var on = !!picked[no];
@@ -424,6 +426,7 @@
       if (Array.isArray(e.data.ids)) {
         known = {}; e.data.ids.forEach(function (id) { var n = String(id).replace(/^girin:/, ''); if (/^\d+$/.test(n)) known[n] = 1; });
         registered = {}; (e.data.reg || []).forEach(function (id) { registered[String(id).replace(/^girin:/, '')] = 1; });
+        try { localStorage.setItem('girin_reg_' + KEY, JSON.stringify(Object.keys(registered))); } catch (er) {}
         saveKnown(); paint(); refreshCount(); refreshDetail();
       }
     }
@@ -489,13 +492,13 @@
   // 상품을 읽어서 담기 (쇼핑몰 창은 열지 않음)
   async function collect(nos) {
     if (busy || !nos.length) return;
-    var reg = nos.filter(function (n) { return known[n]; });
-    var held = nos.filter(function (n) { return !known[n] && pending[n]; });
-    nos = nos.filter(function (n) { return !known[n] && !pending[n]; });
+    var reg = nos.filter(function (n) { return registered[n]; });
+    var held = nos.filter(function (n) { return !registered[n] && pending[n]; });
+    nos = nos.filter(function (n) { return !registered[n] && !pending[n]; });
     if (!nos.length) {
       picked = {}; paint(); refreshCount();
       return askGo(reg.length ? '이미 등록한 상품입니다' : '이미 담은 상품입니다',
-        (reg.length ? '이미 ' + SHOP_NAME + '에 등록(또는 수집)한 상품 ' + reg.length + '개' : '') + (held.length ? (reg.length ? '\n' : '') + '이미 담아 둔 상품 ' + held.length + '개' : '') + '\n담은 상품 ' + pendingCount() + '개');
+        (reg.length ? '이미 ' + SHOP_NAME + '에 등록한 상품 ' + reg.length + '개' : '') + (held.length ? (reg.length ? '\n' : '') + '이미 담아 둔 상품 ' + held.length + '개' : '') + '\n담은 상품 ' + pendingCount() + '개');
     }
     setBusy(true);
     var got = 0, fails = [];
@@ -524,7 +527,7 @@
     if (!a) return;
     if (a === 'mini') { var m = box.classList.toggle('mini'); $('mini').textContent = m ? '＋' : '－'; return; }
     if (a === 'close') { if (confirm('수집기를 끌까요? (담은 상품은 그대로 남아요)')) location.href = here().href; return; }
-    if (a === 'pickall') { lastSoldSkipped = 0; listNos(D()).forEach(function (n) { if (!known[n] && !pending[n]) picked[n] = true; }); paint(); refreshCount(); status(lastSoldSkipped ? '품절 ' + lastSoldSkipped + '개는 빼고 골랐습니다. (필요하면 하나씩 ✓)' : ''); }
+    if (a === 'pickall') { lastSoldSkipped = 0; listNos(D()).forEach(function (n) { if (!registered[n] && !pending[n]) picked[n] = true; }); paint(); refreshCount(); status(lastSoldSkipped ? '품절 ' + lastSoldSkipped + '개는 빼고 골랐습니다. (필요하면 하나씩 ✓)' : ''); }
     if (a === 'clear') { picked = {}; paint(); refreshCount(); status(''); }
     if (a === 'send-picked') collect(Object.keys(picked));
     if (a === 'send-detail' && detailNo) collect([detailNo]);
@@ -543,7 +546,7 @@
       allCategoryNos(cur, cnt).then(function (nos) {
         setBusy(false);
         if (!nos.length) return status(lastSoldSkipped ? cur + '~' + (cur + cnt - 1) + '페이지 상품 ' + lastSoldSkipped + '개가 모두 품절이라 수집할 상품이 없습니다.' : '⚠️ 이 분류에서 상품을 찾지 못했습니다.');
-        var fresh = nos.filter(function (n) { return !known[n] && !pending[n]; });
+        var fresh = nos.filter(function (n) { return !registered[n] && !pending[n]; });
         if (!fresh.length) return collect(nos);
         if (confirm(cur + '~' + (cur + cnt - 1) + '페이지 새 상품 ' + fresh.length + '개를 수집할까요?' + (nos.length > fresh.length ? ' (이미 등록·담은 ' + (nos.length - fresh.length) + '개 제외)' : '') + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(fresh.length * (DELAY + 400) / 60000) + '분)')) collect(nos);
         else status('취소했습니다.');
