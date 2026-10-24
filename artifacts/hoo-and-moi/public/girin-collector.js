@@ -63,7 +63,7 @@
     '<div class="row"><button data-a="pickall">이 페이지 전체 선택</button><button data-a="clear">선택 해제</button></div>' +
     '<button class="p" data-a="send-picked">✅ 선택한 0개 수집</button>' +
     '<button data-a="send-page">이 페이지 전체 수집</button>' +
-    '<button data-a="send-cate">이 분류 전체 수집 (모든 페이지)</button>' +
+    '<button data-a="send-cate">이 분류 여러 페이지 수집</button>' +
     '<button data-a="send-detail" style="display:none">이 상품 수집</button>' +
     '<div class="bar"><i></i></div><div class="st"></div>' +
     '</div>';
@@ -322,13 +322,20 @@
     all.forEach(function (li) { var n = noOf(li); if (!n) return; if (visibleSoldout(li)) { soldCard[n] = true; lastSoldSkipped++; return; } out.push(n); });
     return out;
   }
-  async function allCategoryNos() {
+  // 이 분류의 마지막 페이지 번호 (페이지 번호 줄에서 읽음)
+  function lastPage() {
+    var mx = 1;
+    Array.prototype.forEach.call(D().querySelectorAll('a[href*="page="]'), function (a) { var m = (a.getAttribute('href') || '').match(/[?&]page=(\d+)/); if (m && +m[1] > mx) mx = +m[1]; });
+    return mx;
+  }
+  var MAX_PAGES = 50; // 한 번에 최대 50페이지(약 1,000개) — 수집함이 넘치지 않도록
+  async function allCategoryNos(from, count) {
     var cate = (here().search.match(/cate_no=(\d+)/) || [])[1];
     if (!cate) throw new Error('분류 목록 화면에서 눌러 주세요.');
-    var nos = [], page = 1, seen = {};
+    var nos = [], page = from, seen = {};
     lastSoldSkipped = 0;
-    while (page < 200) {
-      status('목록 읽는 중… ' + page + '페이지 (' + nos.length + '개)');
+    while (page < from + count) {
+      status('목록 읽는 중… ' + page + '페이지 (' + (page - from + 1) + '/' + count + ', ' + nos.length + '개)');
       var html = await fetch('/product/list.html?cate_no=' + cate + '&page=' + page, { credentials: 'include' }).then(function (r) { return r.text(); });
       var pdoc = new DOMParser().parseFromString(html, 'text/html');
       // 상품 카드가 아예 없을 때만 끝 (품절만 있는 페이지도 다음 페이지는 계속 읽음)
@@ -418,11 +425,19 @@
     if (a === 'send-page') { lastSoldSkipped = 0; var pn = listNos(D()); collect(pn, '이 페이지' + (lastSoldSkipped ? '(품절 ' + lastSoldSkipped + '개 제외)' : '')); }
     if (a === 'send-detail' && detailNo) collect([detailNo], '이 상품');
     if (a === 'send-cate') {
+      var cur = +((here().search.match(/[?&]page=(\d+)/) || [])[1] || 1), last = Math.max(lastPage(), cur);
+      var left = last - cur + 1;
+      var ans = prompt('이 분류는 모두 ' + last + '페이지입니다 (한 페이지 약 21개).
+지금 보는 ' + cur + '페이지부터 몇 페이지를 수집할까요?
+(한 번에 최대 ' + MAX_PAGES + '페이지)', String(Math.min(left, 5)));
+      if (ans === null) return;
+      var cnt = Math.min(parseInt(ans, 10) || 0, left, MAX_PAGES);
+      if (cnt < 1) return status('⚠️ 페이지 수를 숫자로 적어 주세요.');
       var opened = openTarget();
       opened.catch(function () {});
-      allCategoryNos().then(function (nos) {
-        if (!nos.length) return status(lastSoldSkipped ? '이 분류 상품 ' + lastSoldSkipped + '개가 모두 품절이라 수집할 상품이 없습니다.' : '⚠️ 이 분류에서 상품을 찾지 못했습니다.');
-        if (confirm('이 분류의 상품 ' + nos.length + '개를 모두 수집할까요?' + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(nos.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 전체', opened);
+      allCategoryNos(cur, cnt).then(function (nos) {
+        if (!nos.length) return status(lastSoldSkipped ? cur + '~' + (cur + cnt - 1) + '페이지 상품 ' + lastSoldSkipped + '개가 모두 품절이라 수집할 상품이 없습니다.' : '⚠️ 이 분류에서 상품을 찾지 못했습니다.');
+        if (confirm(cur + '~' + (cur + cnt - 1) + '페이지 상품 ' + nos.length + '개를 수집할까요?' + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(nos.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 ' + cur + '~' + (cur + cnt - 1) + '페이지', opened);
         else status('취소했습니다.');
       }).catch(function (e2) { status('⚠️ ' + e2.message); });
     }

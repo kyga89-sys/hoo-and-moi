@@ -1249,7 +1249,7 @@ export default function App() {
     ...productsRef.current.map((p: any) => p.source_id).filter(Boolean),
     ...collectBoxRef.current.map((it: any) => it.source_id)
   ]));
-  useEffect(() => { try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); } catch (e) {} }, [collectBox]);
+  useEffect(() => { try { localStorage.setItem(COLLECT_BOX_KEY, JSON.stringify(collectBox)); } catch (e) { alert('수집함이 가득 찼습니다. 수집함의 상품을 먼저 등록하거나 지운 뒤 다시 수집해 주세요.'); } }, [collectBox]);
   useEffect(() => {
     // 수집기가 이 창을 열 때 붙인 확인 번호 (이 번호로 온 요청에만 대답 → 새로고침 직전 화면이 대신 받는 일 방지)
     const collectNonce = new URLSearchParams(window.location.search).get('cn') || '';
@@ -2473,7 +2473,7 @@ export default function App() {
                       <code style={{ flex: 1, minWidth: 0, padding: '7px 10px', borderRadius: '8px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, fontSize: '11.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookmarkletCode}</code>
                       <button onClick={async () => alert((await copyText(bookmarkletCode)) ? '복사했습니다.' : '복사 실패')} style={A.smallBtn('outline')}><Copy size={13} />복사</button>
                     </div>
-                    <p style={{ margin: '10px 0 0', color: THEME.subText }}>사용: gi-rin.com 로그인 → 상품 목록이나 상세 화면에서 즐겨찾기의 <strong>🛒 기린 수집기</strong> 클릭 → 오른쪽 아래 패널에서 보낼 쇼핑몰 고르고<br />· 사진 왼쪽 위 ✓ 로 고른 뒤 [선택 수집] · [이 페이지 전체 수집] · [이 분류 전체 수집] · 상세 화면은 [이 상품 수집]<br />→ 이 관리자 창이 열리며 수집함으로 들어옵니다. (이 창에서 관리자 로그인 상태여야 해요)</p>
+                    <p style={{ margin: '10px 0 0', color: THEME.subText }}>사용: gi-rin.com 로그인 → 상품 목록이나 상세 화면에서 즐겨찾기의 <strong>🛒 기린 수집기</strong> 클릭 → 오른쪽 아래에 수집 패널이 뜹니다<br />· 사진 왼쪽 위 ✓ 로 고른 뒤 [선택 수집] · [이 페이지 전체 수집] · [이 분류 여러 페이지 수집](한 번에 최대 50페이지) · 상세 화면은 [이 상품 수집]<br />→ 이 관리자 창이 열리며 수집함으로 들어옵니다. (이 창에서 관리자 로그인 상태여야 해요)</p>
                   </div>
                 </details>
 
