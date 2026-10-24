@@ -427,9 +427,7 @@
     if (a === 'send-cate') {
       var cur = +((here().search.match(/[?&]page=(\d+)/) || [])[1] || 1), last = Math.max(lastPage(), cur);
       var left = last - cur + 1;
-      var ans = prompt('이 분류는 모두 ' + last + '페이지입니다 (한 페이지 약 21개).
-지금 보는 ' + cur + '페이지부터 몇 페이지를 수집할까요?
-(한 번에 최대 ' + MAX_PAGES + '페이지)', String(Math.min(left, 5)));
+      var ans = prompt('이 분류는 모두 ' + last + '페이지입니다 (한 페이지 약 21개).\n지금 보는 ' + cur + '페이지부터 몇 페이지를 수집할까요?\n(한 번에 최대 ' + MAX_PAGES + '페이지)', String(Math.min(left, 5)));
       if (ans === null) return;
       var cnt = Math.min(parseInt(ans, 10) || 0, left, MAX_PAGES);
       if (cnt < 1) return status('⚠️ 페이지 수를 숫자로 적어 주세요.');
