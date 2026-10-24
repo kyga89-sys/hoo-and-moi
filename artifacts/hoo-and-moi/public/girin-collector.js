@@ -275,7 +275,7 @@
         if (vals.length) ao.extra = Math.max(0, Math.min.apply(null, vals));
       });
     }
-    var fmt = function (o) { return o.v + (o.extra > 0 ? '(+' + won(o.extra) + '원)' : '') + (o.sold ? '(품절)' : ''); };
+    var fmt = function (o) { return o.v + (o.extra > 0 ? '(+' + o.extra + '원)' : '') + (o.sold ? '(품절)' : ''); };
     var colors = [], sizes = [];
     dims.forEach(function (dim, i) {
       var list = dimOut[i].map(fmt);
@@ -435,7 +435,10 @@
       opened.catch(function () {});
       allCategoryNos(cur, cnt).then(function (nos) {
         if (!nos.length) return status(lastSoldSkipped ? cur + '~' + (cur + cnt - 1) + '페이지 상품 ' + lastSoldSkipped + '개가 모두 품절이라 수집할 상품이 없습니다.' : '⚠️ 이 분류에서 상품을 찾지 못했습니다.');
-        if (confirm(cur + '~' + (cur + cnt - 1) + '페이지 상품 ' + nos.length + '개를 수집할까요?' + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(nos.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 ' + cur + '~' + (cur + cnt - 1) + '페이지', opened);
+        // 페이지를 읽는 동안 쇼핑몰에서 받아 둔 "이미 등록됨" 목록으로 미리 빼고 물어봄
+        var fresh = nos.filter(function (n) { return !known[n]; });
+        if (!fresh.length) return status('이미 모두 등록(또는 수집함에 있는) 상품입니다. 건너뛴 상품 ' + nos.length + '개');
+        if (confirm(cur + '~' + (cur + cnt - 1) + '페이지 새 상품 ' + fresh.length + '개를 수집할까요?' + (nos.length > fresh.length ? ' (이미 있는 ' + (nos.length - fresh.length) + '개 제외)' : '') + (lastSoldSkipped ? ' (품절 ' + lastSoldSkipped + '개 제외)' : '') + ' (약 ' + Math.ceil(fresh.length * (DELAY + 400) / 60000) + '분)')) collect(nos, '분류 ' + cur + '~' + (cur + cnt - 1) + '페이지', opened);
         else status('취소했습니다.');
       }).catch(function (e2) { status('⚠️ ' + e2.message); });
     }

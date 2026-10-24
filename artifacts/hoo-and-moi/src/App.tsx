@@ -170,6 +170,7 @@ const KAKAO_STATE_KEY = 'hm_kakao_state';
 const COLLECT_BOX_KEY = 'hm_collect_box_v1';
 const COLLECT_ORIGIN_RE = /^https:\/\/(www\.)?gi-rin\.com$|^https:\/\/gilgilaa\.cafe24\.com$/;
 // 수집기에서 온 값만 골라 담기 (모양·길이 확인)
+const optNoComma = (s: string) => s.replace(/\(\+([\d,]+)원\)/g, (_m, n) => `(+${n.replace(/,/g, '')}원)`);
 const cleanCollected = (it: any) => {
   const str = (v: any, n: number) => (typeof v === 'string' ? v : '').trim().slice(0, n);
   const url = (v: any) => (typeof v === 'string' && /^https:\/\//.test(v) ? v.slice(0, 500) : '');
@@ -178,7 +179,8 @@ const cleanCollected = (it: any) => {
     source_id: str(it.source_id, 40), source_url: url(it.source_url),
     brand: str(it.brand, 40) || '자체제작', name: str(it.name, 100), raw_name: str(it.raw_name, 200),
     consumer_price: int(it.consumer_price), cost_price: int(it.cost_price),
-    colors: str(it.colors, 600), sizes: str(it.sizes, 600),
+    // 옵션은 쉼표로 나뉘므로 추가금의 천 단위 쉼표는 뺌: 13(+3,000원) → 13(+3000원)
+    colors: optNoComma(str(it.colors, 600)), sizes: optNoComma(str(it.sizes, 600)),
     main_image: url(it.main_image), sub_images: (Array.isArray(it.sub_images) ? it.sub_images : []).map(url).filter(Boolean).slice(0, 30),
     soldout: !!it.soldout, collected_at: str(it.collected_at, 40)
   };
@@ -1324,7 +1326,7 @@ export default function App() {
         const cat = it.category2 || suggestNewCategory({ name: it.name, category: '' }).category2 || '';
         const row: any = {
           name: it.name, price: it.price || collectPrice(it, collectRule, collectRate), cost_price: it.cost_price,
-          main_image: it.main_image, sub_images: (it.sub_images || []).join(','), sizes: it.sizes, colors: it.colors,
+          main_image: it.main_image, sub_images: (it.sub_images || []).join(','), sizes: optNoComma(it.sizes || ''), colors: optNoComma(it.colors || ''),
           brand: it.brand, description: '', category: cat, source_id: it.source_id
         };
         if (hasProductExtraColumns) row.is_soldout = !!it.soldout;
@@ -2487,7 +2489,7 @@ export default function App() {
                       <span style={{ fontSize: '13px' }}>%</span>
                       <button onClick={() => setCollectBox(prev => prev.map((it: any) => ({ ...it, price: collectPrice(it, collectRule, collectRate) })))} style={A.smallBtn('dark')}>전체에 적용</button>
                     </div>
-                    <p style={{ ...A.help, margin: '0 0 10px' }}>추가금(예: 13(+3,000원))은 기린 도매 금액 그대로 들어와요. 필요하면 옵션 칸에서 고쳐주세요.</p>
+                    <p style={{ ...A.help, margin: '0 0 10px' }}>추가금(예: 13(+3000원))은 기린 도매 금액 그대로 들어와요. 필요하면 옵션 칸에서 고쳐주세요.</p>
                     <div style={{ ...A.row2 }}>
                       <button onClick={() => { const all = fresh.every((it: any) => collectPicked[it.source_id]); const n: Record<string, boolean> = {}; if (!all) fresh.forEach((it: any) => { n[it.source_id] = true; }); setCollectPicked(n); }} style={{ ...A.btn('outline'), height: '40px', fontSize: '13px' }}>새 상품 전체 선택 ({fresh.length})</button>
                       <button onClick={() => { if (window.confirm(`선택한 ${picked.length}개를 수집함에서 뺄까요? (등록된 상품은 그대로)`)) { setCollectBox(prev => prev.filter((it: any) => !collectPicked[it.source_id])); setCollectPicked({}); } }} disabled={!picked.length} style={{ ...A.btn('danger'), height: '40px', fontSize: '13px', opacity: picked.length ? 1 : 0.4 }}>선택 빼기</button>
