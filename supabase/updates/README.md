@@ -4,7 +4,8 @@
 > - `01_batch1_settings.sql` — 사업자 정보·소식방 주소 ✅ 실행함
 > - `02_home_layout.sql` — 홈 화면 배치(분류·브랜드·상품 순서) ✅ 실행함
 > - `03_soldout_listprice.sql` — 품절 처리 · 정가 삭선 배율 · 품절 주문 막기 ✅ 실행함
-> - `04_kakao_notify.sql` — 카카오톡 신규주문 알림 (관리자 나에게 보내기)
+> - `04_kakao_notify.sql` — 카카오톡 신규주문 알림 (관리자 나에게 보내기) ✅ 실행함
+> - `05_new_category.sql` — 새 분류(category2)·기획전 태그(tags) 칸, 새 분류 사용 여부, 일괄 저장 함수
 
 ## 카카오톡 주문 알림 (feature/kakao-notify)
 

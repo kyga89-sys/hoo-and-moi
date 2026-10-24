@@ -15,6 +15,8 @@ const BATCH1_STORE_SETTINGS_COLUMNS = `${BASE_STORE_SETTINGS_COLUMNS}, community
 const LAYOUT_STORE_SETTINGS_COLUMNS = `${BATCH1_STORE_SETTINGS_COLUMNS}, home_layout`;
 // supabase/updates/03_soldout_listprice.sql 로 추가된 칸 (정가 배율 %)
 const STORE_SETTINGS_COLUMNS = `${LAYOUT_STORE_SETTINGS_COLUMNS}, list_price_rate`;
+// supabase/updates/05_new_category.sql 로 추가된 칸 (새 분류 사용 여부)
+const CATEGORY_STORE_SETTINGS_COLUMNS = `${STORE_SETTINGS_COLUMNS}, use_new_category`;
 
 // 정가(삭선) 계산: 상품에 정가가 있으면 그 값, 비어 있으면 판매가 × (1 + 배율%) 을 보기 좋게 올림
 //   1만원 미만은 100원 단위, 이상은 1,000원 단위. 정가 0 또는 배율 0 이면 표시 안 함
@@ -175,6 +177,85 @@ const THEME = {
   brown: '#6B5B53' 
 };
 
+// 🗂️ 새 분류 (supabase/updates/05_new_category.sql 의 category2 칸) — 대분류 > 중분류, 이 순서대로 표시
+const NEW_CATEGORIES: Record<string, string[]> = {
+  '아우터': ['패딩/점퍼', '자켓/코트', '가디건/집업'],
+  '상의': ['티셔츠/나시', '맨투맨/후드', '니트', '셔츠/블라우스', '조끼/베스트'],
+  '하의': ['팬츠', '청바지', '반바지', '레깅스'],
+  '원피스': [], '스커트': [],
+  '세트': ['상하 세트'],
+  '홈웨어': ['실내복/잠옷'],
+  '베이비': ['바디슈트/우주복', '속싸개/블랭킷', '턱받이/손발싸개', '베이비 의류'],
+  '한복': [], '수영복': [], '신발': [],
+  '잡화': ['모자', '헤어', '양말/레그워머', '목도리/워머', '가방', '기타']
+};
+const NEW_CATEGORY_OPTIONS = Object.entries(NEW_CATEGORIES).flatMap(([main, subs]) => subs.length ? subs.map(s => `${main} > ${s}`) : [main]);
+// 예전 분류 중 기획전(분류가 아니라 태그로 옮김)
+const PROMO_OLD_CATEGORIES = ['NEW 할로윈특가', 'CON 콘신상'];
+// 예전 분류 → 새 분류 (그대로 옮겨도 되는 것)
+const OLD_TO_NEW: Record<string, string> = {
+  '아우터 > 코트': '아우터 > 자켓/코트', '아우터 > 자켓': '아우터 > 자켓/코트', '아우터 > 점퍼': '아우터 > 패딩/점퍼',
+  '아우터 > 가디건': '아우터 > 가디건/집업', '아우터 > 집업': '아우터 > 가디건/집업',
+  '탑 > 맨투맨': '상의 > 맨투맨/후드', '탑 > 티셔츠': '상의 > 티셔츠/나시', '탑 > 니트': '상의 > 니트', '탑 > 스웨터': '상의 > 니트',
+  '탑 > 조끼': '상의 > 조끼/베스트', '탑 > 베스트': '상의 > 조끼/베스트',
+  '바지 > 팬츠': '하의 > 팬츠', '하의 > 바지': '하의 > 팬츠', '바지 > 청바지': '하의 > 청바지', '바지 > 반바지': '하의 > 반바지', '하의 > 레깅스': '하의 > 레깅스',
+  '원피스': '원피스', '원피스 > 원피스': '원피스', '스커트': '스커트', '스커트 > 치마': '스커트',
+  '상하 세트': '세트 > 상하 세트', '홈웨어': '홈웨어 > 실내복/잠옷', '홈웨어 > 실내복': '홈웨어 > 실내복/잠옷',
+  '베이비 > 바디슈트': '베이비 > 바디슈트/우주복', '한복': '한복', '수영복': '수영복',
+  '악세사리 > 헤어': '잡화 > 헤어', '악세사리 > 모자': '잡화 > 모자', '악세사리 > 양말': '잡화 > 양말/레그워머',
+  '악세사리 > 목도리&스카프': '잡화 > 목도리/워머', '악세사리 > 가방': '잡화 > 가방', '악세사리 > 기타': '잡화 > 기타'
+};
+// 상품 이름 → 새 분류 (위에서부터 먼저 맞는 것)
+const NAME_RULES: [string, string[]][] = [
+  ['베이비 > 속싸개/블랭킷', ['속싸개', '블랭킷', '나비잠', '담요', '스와들']],
+  ['베이비 > 턱받이/손발싸개', ['턱받이', '손발싸개', '빕']],
+  ['베이비 > 바디슈트/우주복', ['바디슈트', '우주복', '롬퍼', '전신슈트', '배냇']],
+  ['한복', ['한복', '당의', '배자', '노리개', '조바위', '복주머니', '덧신', '버선']],
+  ['수영복', ['수영', '래쉬', '비키니']],
+  ['신발', ['슈즈', '부츠', '어그', '운동화', '샌들', '슬리퍼', '장화', '구두']],
+  ['잡화 > 헤어', ['핀', '헤어', '밴드', '곱창', '스크런치', '머리끈', '터번', '두건']],
+  ['잡화 > 모자', ['보넷', '보냇', '비니', '모자', '버킷', '벙거지', '베레모']],
+  ['잡화 > 양말/레그워머', ['삭스', '양말', '레그워머', '타이즈', '스타킹']],
+  ['잡화 > 목도리/워머', ['머플러', '목도리', '워머', '스카프']],
+  ['잡화 > 가방', ['가방', '백팩', '크로스백', '토트백']],
+  ['잡화 > 기타', ['에이프런', '앞치마', '장갑', '와펜', '망토']],
+  ['홈웨어 > 실내복/잠옷', ['잠옷', '파자마', '내복', '실내복', '수면']],
+  ['세트 > 상하 세트', ['상하복', '세트', '셋업', '셋트', 'SET', 'set']],
+  ['원피스', ['원피스', '드레스', '점프슈트']],
+  ['스커트', ['스커트', '치마']],
+  ['아우터 > 패딩/점퍼', ['패딩', '점퍼', '바람막이', '야상', '플리스', '덤블', '뽀글이']],
+  ['아우터 > 자켓/코트', ['자켓', '재킷', '코트', '블레이저']],
+  ['아우터 > 가디건/집업', ['가디건', '집업']],
+  ['상의 > 조끼/베스트', ['조끼', '베스트', '뷔스티에']],
+  ['상의 > 맨투맨/후드', ['맨투맨', '후드', '후디', '스웻']],
+  ['상의 > 니트', ['니트', '스웨터']],
+  ['상의 > 셔츠/블라우스', ['셔츠', '블라우스', '남방']],
+  ['하의 > 레깅스', ['레깅스']],
+  ['하의 > 반바지', ['숏츠', '반바지', '버뮤다', '쇼츠']],
+  ['하의 > 청바지', ['데님', '청바지']],
+  ['하의 > 팬츠', ['팬츠', '바지', '조거', '슬랙스', '오버롤', '멜빵', '블루머', '부츠컷', '트레이닝']],
+  ['상의 > 티셔츠/나시', ['티셔츠', '나시', '폴라', '래글런', '나그랑', '탑', '티']]
+];
+// 새 분류 추천: auto = 예전 분류로 확실, guess = 이름으로 추측(확인 권장), none = 추천 없음
+const suggestNewCategory = (p: any): { category2: string; tags: string[]; level: 'auto' | 'guess' | 'none' } => {
+  const old = (p.category || '').trim();
+  const tags = PROMO_OLD_CATEGORIES.includes(old) ? [old] : [];
+  const name = p.name || '';
+  const byName = NAME_RULES.find(([, kws]) => kws.some(k => name.includes(k)))?.[0] || '';
+  if (OLD_TO_NEW[old]) return { category2: OLD_TO_NEW[old], tags, level: 'auto' };
+  const oldMain = old.split('>')[0].trim();
+  const mainMap: Record<string, string> = { '탑': '상의', '바지': '하의', '하의': '하의', '아우터': '아우터', '베이비': '베이비', '슈즈': '신발', '악세사리': '잡화', '홈웨어': '홈웨어' };
+  const newMain = mainMap[oldMain];
+  if (newMain) {
+    if (byName.startsWith(newMain)) return { category2: byName, tags, level: 'auto' };
+    if (newMain === '신발') return { category2: '신발', tags, level: 'auto' };
+    if (byName) return { category2: byName, tags, level: 'guess' };
+    const fallback: Record<string, string> = { '상의': '상의 > 티셔츠/나시', '하의': '하의 > 팬츠', '베이비': '베이비 > 베이비 의류', '잡화': '잡화 > 기타', '아우터': '아우터 > 자켓/코트', '홈웨어': '홈웨어 > 실내복/잠옷' };
+    return { category2: fallback[newMain] || '', tags, level: 'guess' };
+  }
+  return byName ? { category2: byName, tags, level: 'guess' } : { category2: '', tags, level: 'none' };
+};
+
 const BASE_CATEGORIES = {
   '아우터': ['코트', '가디건', '자켓', '점퍼', '집업'],
   '탑': [], '원피스': [], '바지': ['청바지', '반바지', '슈트', '팬츠'], '스커트': [], '상하 세트': [],
@@ -203,6 +284,16 @@ export default function App() {
     list_price_rate: DEFAULT_LIST_PRICE_RATE
   });
   const [hasRateColumn, setHasRateColumn] = useState(false);
+  // 🗂️ 새 분류: 손님 화면에 쓸지 (store_settings.use_new_category), SQL 05 실행 여부
+  const [useNewCategory, setUseNewCategory] = useState(false);
+  const [hasNewCategoryColumn, setHasNewCategoryColumn] = useState(false);
+  const [activeTag, setActiveTag] = useState('');
+  // 설정 > 분류 정리: 저장 전 고친 값 (상품 id → 새 분류/태그)
+  const [catDrafts, setCatDrafts] = useState<Record<string, { category2: string; tags: string[] }>>({});
+  const [catFilter, setCatFilter] = useState<'guess' | 'none' | 'auto' | 'saved' | 'all'>('none');
+  const [catSearch, setCatSearch] = useState('');
+  const [catLimit, setCatLimit] = useState(50);
+  const [isSavingCats, setIsSavingCats] = useState(false);
   const [bankInfo, setBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
   const [editBankInfo, setEditBankInfo] = useState({ id: '', bank_name: '', account_number: '', depositor_name: '' });
 
@@ -321,6 +412,9 @@ export default function App() {
   const [prodColors, setProdColors] = useState(''); 
   const [prodCategory, setProdCategory] = useState(''); 
   const [prodBrand, setProdBrand] = useState('');
+  // 새 분류(category2)·기획전 태그 — SQL 05 실행 후
+  const [prodCategory2, setProdCategory2] = useState('');
+  const [prodTags, setProdTags] = useState('');
 
   const [prodFiles, setProdFiles] = useState<FileList | null>(null); 
   const [subProdFiles, setSubProdFiles] = useState<FileList | null>(null); 
@@ -412,7 +506,7 @@ export default function App() {
     else handleGoHome();
   };
 
-  useEffect(() => { setCurrentPage(1); homeScrollRef.current = 0; }, [activeBrand, activeLargeCat, activeSmallCat, searchQuery]);
+  useEffect(() => { setCurrentPage(1); homeScrollRef.current = 0; }, [activeBrand, activeLargeCat, activeSmallCat, searchQuery, activeTag]);
   useEffect(() => { setAdminEditPage(1); }, [adminEditSearch, adminEditBrand, adminEditCategory, adminEditStatus]);
 
   useEffect(() => {
@@ -481,7 +575,7 @@ export default function App() {
     try {
       // 새 칸 SQL 실행 전이라면 있는 칸만으로 불러오기 (최신 → 1차 → 기본 순서로 시도)
       let data: any[] | null = null;
-      for (const cols of [STORE_SETTINGS_COLUMNS, LAYOUT_STORE_SETTINGS_COLUMNS, BATCH1_STORE_SETTINGS_COLUMNS, BASE_STORE_SETTINGS_COLUMNS]) {
+      for (const cols of [CATEGORY_STORE_SETTINGS_COLUMNS, STORE_SETTINGS_COLUMNS, LAYOUT_STORE_SETTINGS_COLUMNS, BATCH1_STORE_SETTINGS_COLUMNS, BASE_STORE_SETTINGS_COLUMNS]) {
         const res = await supabase.from('store_settings').select(cols).order('id', { ascending: true }).limit(1);
         if (!res.error) { data = res.data; break; }
       }
@@ -497,6 +591,8 @@ export default function App() {
           list_price_rate: typeof data[0].list_price_rate === 'number' ? data[0].list_price_rate : DEFAULT_LIST_PRICE_RATE
         });
         setHasRateColumn('list_price_rate' in data[0]);
+        setHasNewCategoryColumn('use_new_category' in data[0]);
+        setUseNewCategory(!!data[0].use_new_category);
         setHomeLayout(data[0].home_layout && typeof data[0].home_layout === 'object' ? data[0].home_layout : {});
       }
     } catch (err) {}
@@ -568,12 +664,12 @@ export default function App() {
   };
   const fetchProducts = async (withCost = isAdmin) => {
     // 새 칸 SQL 실행 전이면 있는 칸만으로 불러오기 (최신 → 노출순서 → 기본 순서로 시도)
-    const colCandidates = [`${PUBLIC_PRODUCT_COLUMNS}, display_order, is_soldout, list_price`, `${PUBLIC_PRODUCT_COLUMNS}, display_order`, PUBLIC_PRODUCT_COLUMNS];
+    const colCandidates = [`${PUBLIC_PRODUCT_COLUMNS}, display_order, is_soldout, list_price, category2, tags`, `${PUBLIC_PRODUCT_COLUMNS}, display_order, is_soldout, list_price`, `${PUBLIC_PRODUCT_COLUMNS}, display_order`, PUBLIC_PRODUCT_COLUMNS];
     let colIdx = 0;
     const query = (from: number, to: number, count = false) => {
       const cols = withCost ? "*" : colCandidates[colIdx];
       let q: any = supabase.from("products").select(cols, count ? { count: 'exact' } : undefined);
-      if (withCost || colIdx < 2) q = q.order("display_order", { ascending: true, nullsFirst: true });
+      if (withCost || colIdx < colCandidates.length - 1) q = q.order("display_order", { ascending: true, nullsFirst: true });
       return q.order("created_at", { ascending: false }).range(from, to);
     };
 
@@ -617,16 +713,18 @@ export default function App() {
     });
     return tree;
   };
-  const categoryTree = getCombinedCategories();
+  // 새 분류로 전환했으면 새 분류(category2), 아니면 예전 분류(category)
+  const catOf = (p: any): string => (useNewCategory ? p.category2 : p.category) || '';
+  const categoryTree: Record<string, string[]> = useNewCategory ? NEW_CATEGORIES : getCombinedCategories();
 
   // 🏷️ 홈 탭: 상품이 있는 분류만, 정해진 순서대로 (기타는 맨 뒤)
-  const MAIN_CAT_ORDER = ['아우터', '탑', '바지', '하의', '원피스', '스커트', '상하 세트', '홈웨어', '베이비', '한복', '수영복', '슈즈', '악세사리'];
+  const MAIN_CAT_ORDER = useNewCategory ? Object.keys(NEW_CATEGORIES) : ['아우터', '탑', '바지', '하의', '원피스', '스커트', '상하 세트', '홈웨어', '베이비', '한복', '수영복', '슈즈', '악세사리'];
   const catRank = (name: string) => name === '기타' ? 999 : (MAIN_CAT_ORDER.indexOf(name) === -1 ? 500 : MAIN_CAT_ORDER.indexOf(name));
   const mainCatCounts: Record<string, number> = {};
   const subCatCounts: Record<string, number> = {};
   const brandCounts: Record<string, number> = {};
   products.forEach(p => {
-    const [main, ...rest] = (p.category || '').split('>').map((s: string) => s.trim());
+    const [main, ...rest] = catOf(p).split('>').map((s: string) => s.trim());
     if (main) mainCatCounts[main] = (mainCatCounts[main] || 0) + 1;
     if (main && rest.length) { const key = `${main} > ${rest.join(' > ')}`; subCatCounts[key] = (subCatCounts[key] || 0) + 1; }
     if (p.brand) brandCounts[p.brand] = (brandCounts[p.brand] || 0) + 1;
@@ -634,15 +732,21 @@ export default function App() {
   // 설정 > 홈 화면 배치에서 저장한 순서가 있으면 그 순서, 없으면 기본 순서
   const homeMainCats = orderBySaved(Object.keys(mainCatCounts).sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'ko')), c => c, homeLayout.category_order);
   const homeSubCats = activeLargeCat === '전체' ? [] : Object.keys(subCatCounts)
-    .filter(k => k.startsWith(`${activeLargeCat} > `)).map(k => k.slice(activeLargeCat.length + 3)).sort((a, b) => a.localeCompare(b, 'ko'));
+    .filter(k => k.startsWith(`${activeLargeCat} > `)).map(k => k.slice(activeLargeCat.length + 3))
+    .sort((a, b) => { const o = useNewCategory ? (NEW_CATEGORIES[activeLargeCat] || []) : []; const ia = o.indexOf(a), ib = o.indexOf(b); return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b, 'ko'); });
+  // 기획전 태그 (새 분류로 전환했을 때 홈 탭에 표시)
+  const tagCounts: Record<string, number> = {};
+  if (useNewCategory) products.forEach(p => (p.tags || []).forEach((t: string) => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+  const homeTags = Object.keys(tagCounts).sort((a, b) => a.localeCompare(b, 'ko'));
   const homeBrands = orderBySaved(Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko')), b => b.name, homeLayout.brand_order);
 
   const showBrandRow = brandTabOpen || activeBrand !== '전체';
   const isBrandTab = showBrandRow;
-  const isAllTab = !showBrandRow && activeLargeCat === '전체';
-  const selectAllTab = () => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat('전체'); setActiveSmallCat('전체'); };
-  const selectBrandTab = () => { setBrandTabOpen(true); setActiveLargeCat('전체'); setActiveSmallCat('전체'); };
-  const selectMainCat = (main: string) => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat(main); setActiveSmallCat('전체'); };
+  const isAllTab = !showBrandRow && activeLargeCat === '전체' && !activeTag;
+  const selectAllTab = () => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat('전체'); setActiveSmallCat('전체'); setActiveTag(''); };
+  const selectTagTab = (tag: string) => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat('전체'); setActiveSmallCat('전체'); setActiveTag(tag); };
+  const selectBrandTab = () => { setBrandTabOpen(true); setActiveLargeCat('전체'); setActiveSmallCat('전체'); setActiveTag(''); };
+  const selectMainCat = (main: string) => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveTag(''); setActiveLargeCat(main); setActiveSmallCat('전체'); };
 
   // 탭 버튼 모양 통일: main = 1단(채움), sub = 2단(테두리)
   const chipStyle = (active: boolean, level: 'main' | 'sub'): React.CSSProperties => level === 'main' ? {
@@ -656,8 +760,8 @@ export default function App() {
   };
 
   const getBrandCount = (brandName: string) => products.filter(p => p.brand === brandName).length;
-  const getLargeCatCount = (catName: string) => products.filter(p => p.category && p.category.startsWith(catName)).length;
-  const getSmallCatCount = (catName: string, subName: string) => products.filter(p => p.category === `${catName} > ${subName}`).length;
+  const getLargeCatCount = (catName: string) => products.filter(p => catOf(p) === catName || catOf(p).startsWith(`${catName} >`)).length;
+  const getSmallCatCount = (catName: string, subName: string) => products.filter(p => catOf(p) === `${catName} > ${subName}`).length;
 
   const handleSmartPaste = async () => {
     if(!importText) return alert("복사한 글자를 붙여넣어주세요.");
@@ -842,6 +946,11 @@ export default function App() {
         productData.is_soldout = prodSoldout;
         productData.list_price = prodListPrice.trim() === '' ? null : (parseInt(prodListPrice) || 0);
       }
+      // 새 분류·기획전 칸은 SQL(05_new_category.sql) 실행 후에만 저장
+      if (hasCategory2Column) {
+        productData.category2 = prodCategory2 || null;
+        productData.tags = prodTags.split(',').map(t => t.trim()).filter(Boolean);
+      }
       if (main_image) productData.main_image = main_image; 
       if (sub_images_array.length > 0) productData.sub_images = sub_images_array.join(',');
       if (editingProductId && sub_images_array.length === 0 && inputSubImageUrls === '') productData.sub_images = null;
@@ -852,10 +961,11 @@ export default function App() {
       resetProductForm(); await fetchProducts(); setAdminTab('productEdit');
     } catch (err: any) { alert("오류 발생: " + err.message); } finally { setIsUploading(false); }
   };
-  const resetProductForm = () => { setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdListPrice(''); setProdSoldout(false); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdBrand(''); setProdFiles(null); setSubProdFiles(null); setInputSubImageUrls(''); setExistingMainImageUrl(''); setImportText(''); };
-  const openEditProduct = (p: any) => { setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdListPrice(p.list_price == null ? '' : String(p.list_price)); setProdSoldout(!!p.is_soldout); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdBrand(p.brand || ''); setExistingMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd'); };
+  const resetProductForm = () => { setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdListPrice(''); setProdSoldout(false); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdCategory2(''); setProdTags(''); setProdBrand(''); setProdFiles(null); setSubProdFiles(null); setInputSubImageUrls(''); setExistingMainImageUrl(''); setImportText(''); };
+  const openEditProduct = (p: any) => { setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdListPrice(p.list_price == null ? '' : String(p.list_price)); setProdSoldout(!!p.is_soldout); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdCategory2(p.category2 || ''); setProdTags((p.tags || []).join(', ')); setProdBrand(p.brand || ''); setExistingMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd'); };
   // 품절 칸(SQL 03) 이 있는지: 관리자 화면은 전체 칸(*)을 불러오므로 첫 상품에 칸이 있으면 사용 가능
   const hasProductExtraColumns = products.length > 0 && 'is_soldout' in products[0];
+  const hasCategory2Column = products.length > 0 && 'category2' in products[0];
   // 상품 관리 목록에서 품절 ↔ 판매중 바로 바꾸기
   const toggleSoldout = async (p: any) => {
     if (!hasProductExtraColumns) return alert("품절 기능을 쓰려면 supabase/updates/03_soldout_listprice.sql 을 먼저 실행해주세요.");
@@ -1137,13 +1247,14 @@ export default function App() {
     const matchBrand = activeBrand === '전체' || p.brand === activeBrand;
     let matchCategory = true;
     if (activeLargeCat !== '전체') {
-      if (activeSmallCat !== '전체') { matchCategory = p.category === `${activeLargeCat} > ${activeSmallCat}`; } 
-      else { matchCategory = p.category && p.category.startsWith(activeLargeCat); }
+      if (activeSmallCat !== '전체') { matchCategory = catOf(p) === `${activeLargeCat} > ${activeSmallCat}`; } 
+      else { matchCategory = catOf(p) === activeLargeCat || catOf(p).startsWith(`${activeLargeCat} >`); }
     }
     const normalize = (str: string) => (str || '').replace(/\s+/g, '').toLowerCase();
     const normalizedQuery = normalize(searchQuery);
     const matchSearch = !normalizedQuery || normalize(p.name).includes(normalizedQuery) || normalize(p.brand).includes(normalizedQuery);
-    return matchBrand && matchCategory && matchSearch;
+    const matchTag = !activeTag || (p.tags || []).includes(activeTag);
+    return matchBrand && matchCategory && matchSearch && matchTag;
   });
   // 품절 상품은 목록 맨 뒤로 (나머지 순서는 그대로)
   const displayProducts = [...displayProductsRaw.filter(p => !p.is_soldout), ...displayProductsRaw.filter(p => p.is_soldout)];
@@ -1153,7 +1264,7 @@ export default function App() {
 
   const adminDisplayProducts = products.filter(p => {
     const matchBrand = adminEditBrand === '전체' || p.brand === adminEditBrand;
-    const matchCategory = adminEditCategory === '전체' || (p.category && p.category.startsWith(adminEditCategory));
+    const matchCategory = adminEditCategory === '전체' || catOf(p) === adminEditCategory || catOf(p).startsWith(`${adminEditCategory} >`);
     const normalize = (str: string) => (str || '').replace(/\s+/g, '').toLowerCase();
     const matchSearch = !adminEditSearch || normalize(p.name).includes(normalize(adminEditSearch)) || normalize(p.brand).includes(normalize(adminEditSearch));
     const matchStatus = adminEditStatus === '전체' || (adminEditStatus === '품절' ? !!p.is_soldout : !p.is_soldout);
@@ -1489,8 +1600,11 @@ export default function App() {
             <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -20px', padding: '0 20px 10px' }}>
               <button onClick={selectAllTab} style={chipStyle(isAllTab, 'main')}>전체</button>
               <button onClick={selectBrandTab} style={chipStyle(isBrandTab, 'main')}>브랜드</button>
+              {homeTags.map(t => (
+                <button key={`tag-${t}`} onClick={() => selectTagTab(t)} style={chipStyle(activeTag === t, 'main')}>🎁 {t}</button>
+              ))}
               {homeMainCats.map(main => (
-                <button key={main} onClick={() => selectMainCat(main)} style={chipStyle(activeLargeCat === main, 'main')}>{main}</button>
+                <button key={main} onClick={() => selectMainCat(main)} style={chipStyle(activeLargeCat === main && !activeTag, 'main')}>{main}</button>
               ))}
             </div>
             {/* 2단: 브랜드 목록 또는 중분류 */}
@@ -2252,6 +2366,21 @@ export default function App() {
                     </select>
                   </div>
                 </div>
+                {hasCategory2Column && (
+                  <div style={A.row2}>
+                    <div>
+                      <label style={A.label}>새 분류 {useNewCategory && <span style={{ color: THEME.primary }}>*</span>}</label>
+                      <select value={prodCategory2} onChange={e => setProdCategory2(e.target.value)} style={A.input}>
+                        <option value="">새 분류 선택</option>
+                        {NEW_CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={A.label}>기획전 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(쉼표로 여러 개)</span></label>
+                      <input placeholder="예: NEW 할로윈특가" value={prodTags} onChange={e => setProdTags(e.target.value)} style={A.input} />
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label style={A.label}>상품명 <span style={{ color: THEME.primary }}>*</span></label>
                   <input placeholder="상품명을 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ ...A.input, fontWeight: 'bold' }} />
@@ -2699,6 +2828,110 @@ export default function App() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* 🗂️ 분류 정리: 새 분류(category2)·기획전 태그 — 확인 후 저장, [새 분류로 전환]을 켜야 손님 화면에 적용 */}
+              <div style={A.card}>
+                {settingsHeader('newcat', '분류 정리 (새 분류)', !hasNewCategoryColumn ? '준비 필요 (SQL 실행 전)' : `현재 손님 화면: ${useNewCategory ? '새 분류' : '예전 분류'} · 새 분류 저장 ${products.filter(p => p.category2).length} / ${products.length}`)}
+                {settingsOpen.newcat && (() => {
+                  if (!hasNewCategoryColumn || !hasCategory2Column) return (
+                    <p style={{ ...A.help, marginTop: '12px', color: '#c62828' }}>Supabase › SQL Editor 에서 supabase/updates/05_new_category.sql 을 실행한 뒤 새로고침해주세요.</p>
+                  );
+                  const rows = products.map(p => {
+                    const sug = suggestNewCategory(p);
+                    const level: 'saved' | 'auto' | 'guess' | 'none' = p.category2 ? 'saved' : sug.level;
+                    const draft = catDrafts[p.id];
+                    const value = draft ? draft : { category2: p.category2 || sug.category2, tags: p.category2 ? (p.tags || []) : sug.tags };
+                    return { p, level, value, changed: !!draft };
+                  });
+                  const counts = { saved: 0, auto: 0, guess: 0, none: 0 } as Record<string, number>;
+                  rows.forEach(r => { counts[r.level] += 1; });
+                  const q = catSearch.trim().replace(/\s+/g, '').toLowerCase();
+                  const visible = rows.filter(r => (catFilter === 'all' || r.level === catFilter) && (!q || `${r.p.name}${r.p.brand}${r.p.category}`.replace(/\s+/g, '').toLowerCase().includes(q)));
+                  const shown = visible.slice(0, catLimit);
+                  const changedCount = Object.keys(catDrafts).length;
+                  const unsaved = counts.auto + counts.guess + counts.none;
+                  const allTags = Array.from(new Set([...PROMO_OLD_CATEGORIES, ...products.flatMap(p => p.tags || [])]));
+                  const setDraft = (id: string, v: { category2: string; tags: string[] }) => setCatDrafts(d => ({ ...d, [id]: v }));
+                  const saveRows = async (list: typeof rows) => {
+                    const items = list.filter(r => r.value.category2).map(r => ({ id: r.p.id, category2: r.value.category2, tags: r.value.tags }));
+                    if (items.length === 0) return alert("저장할 상품이 없습니다. 새 분류를 먼저 골라주세요.");
+                    setIsSavingCats(true);
+                    try {
+                      for (let i = 0; i < items.length; i += 300) {
+                        const { error } = await supabase.rpc('set_product_categories', { p_items: items.slice(i, i + 300) });
+                        if (error) throw error;
+                      }
+                      setCatDrafts(d => { const n = { ...d }; items.forEach(it => { delete n[it.id]; }); return n; });
+                      await fetchProducts(true);
+                      alert(`${items.length}개 상품의 새 분류를 저장했습니다.`);
+                    } catch (e: any) { alert("저장 실패: " + e.message); } finally { setIsSavingCats(false); }
+                  };
+                  const toggleNewCategory = async () => {
+                    const next = !useNewCategory;
+                    if (next && unsaved > 0 && !window.confirm(`아직 새 분류가 저장되지 않은 상품이 ${unsaved}개 있습니다.\n이 상품들은 [전체]에만 보이고 분류 탭에는 안 보입니다. 그래도 전환할까요?`)) return;
+                    if (!next && !window.confirm("손님 화면을 예전 분류로 되돌릴까요?")) return;
+                    const { error } = await supabase.from('store_settings').update({ use_new_category: next }).eq('id', bankInfo.id);
+                    if (error) return alert("변경 실패: " + error.message);
+                    setUseNewCategory(next); setActiveLargeCat('전체'); setActiveSmallCat('전체'); setActiveTag('');
+                    alert(next ? "손님 화면이 새 분류로 바뀌었습니다. (예전 분류 칸은 그대로 남아 있어 언제든 되돌릴 수 있어요)" : "예전 분류로 되돌렸습니다.");
+                  };
+                  const levelLabel: Record<string, [string, string]> = { saved: ['저장됨', '#2e7d32'], auto: ['자동 추천', '#1976d2'], guess: ['이름 추측', '#e65100'], none: ['확인 필요', '#c62828'] };
+                  return (
+                    <div style={{ marginTop: '16px' }}>
+                      <p style={{ ...A.help, margin: '0 0 12px 0', backgroundColor: THEME.primaryLight, color: THEME.text, padding: '10px 12px', borderRadius: '10px', lineHeight: 1.6 }}>
+                        예전 분류와 상품 이름으로 새 분류를 <strong>추천</strong>해 두었습니다. 확인·수정 후 <strong>저장</strong>하고, 다 되면 맨 아래 <strong>[새 분류로 전환]</strong>을 누르세요. 예전 분류 칸은 그대로 남아 언제든 되돌릴 수 있습니다. 기획전(할로윈특가·콘신상)은 분류 대신 <strong>기획전 태그</strong>로 옮겨져 홈 탭에 🎁로 표시됩니다.
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '6px', marginBottom: '8px' }}>
+                        {(['none', 'guess', 'auto', 'saved'] as const).map(k => (
+                          <button key={k} onClick={() => { setCatFilter(k); setCatLimit(50); }} style={{ height: '56px', borderRadius: '12px', cursor: 'pointer', border: `1px solid ${catFilter === k ? levelLabel[k][1] : THEME.border}`, backgroundColor: catFilter === k ? THEME.bg : '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
+                            <span style={{ fontSize: '17px', fontWeight: 'bold', color: levelLabel[k][1] }}>{counts[k]}</span>
+                            <span style={{ fontSize: '11.5px', color: THEME.text }}>{levelLabel[k][0]}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                        <button onClick={() => { setCatFilter('all'); setCatLimit(50); }} style={chipStyle(catFilter === 'all', 'sub')}>전체 {rows.length}</button>
+                        <input placeholder="상품명 · 브랜드 · 예전 분류 검색" value={catSearch} onChange={e => { setCatSearch(e.target.value); setCatLimit(50); }} style={{ ...A.input, height: '36px', fontSize: '13px', flex: 1, minWidth: 0 }} />
+                      </div>
+                      <div style={{ ...A.row2, marginBottom: '10px' }}>
+                        <button onClick={() => saveRows(visible.filter(r => r.level !== 'saved' || r.changed))} disabled={isSavingCats} style={{ ...A.btn('dark'), height: '42px', fontSize: '13px' }}>{isSavingCats ? '저장 중...' : `보이는 ${visible.filter(r => r.level !== 'saved' || r.changed).length}개 추천대로 저장`}</button>
+                        <button onClick={() => saveRows(rows.filter(r => r.changed))} disabled={isSavingCats || changedCount === 0} style={{ ...A.btn('primary'), height: '42px', fontSize: '13px', opacity: changedCount ? 1 : 0.4 }}>고친 {changedCount}개만 저장</button>
+                      </div>
+                      <div style={{ border: `1px solid ${THEME.border}`, borderRadius: '12px', overflow: 'hidden' }}>
+                        {shown.length === 0 && <p style={{ ...A.help, padding: '20px', textAlign: 'center' }}>해당하는 상품이 없습니다.</p>}
+                        {shown.map(({ p, level, value, changed }, idx) => (
+                          <div key={p.id} style={{ display: 'flex', gap: '10px', padding: '10px', borderTop: idx === 0 ? 'none' : `1px solid ${THEME.border}`, backgroundColor: changed ? '#FFFBEA' : '#fff' }}>
+                            <img src={p.main_image} loading="lazy" style={{ width: '44px', height: '54px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0, backgroundColor: '#eee' }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ fontSize: '11px', margin: 0, color: THEME.subText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <span style={{ color: levelLabel[level][1], fontWeight: 'bold' }}>{levelLabel[level][0]}</span> · {p.brand || '자체제작'} · 예전: {p.category || '없음'}
+                              </p>
+                              <p style={{ fontSize: '13px', margin: '1px 0 5px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                              <select value={value.category2} onChange={e => setDraft(p.id, { ...value, category2: e.target.value })} style={{ ...A.input, height: '34px', fontSize: '12.5px', marginBottom: '5px' }}>
+                                <option value="">새 분류 선택</option>
+                                {NEW_CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                {allTags.map(t => {
+                                  const on = value.tags.includes(t);
+                                  return <button key={t} onClick={() => setDraft(p.id, { ...value, tags: on ? value.tags.filter(x => x !== t) : [...value.tags, t] })} style={{ height: '24px', padding: '0 8px', borderRadius: '12px', fontSize: '11px', cursor: 'pointer', border: `1px solid ${on ? THEME.primary : THEME.border}`, backgroundColor: on ? THEME.primaryLight : '#fff', color: on ? THEME.primary : THEME.subText }}>🎁 {t}</button>;
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {visible.length > catLimit && <button onClick={() => setCatLimit(n => n + 50)} style={{ ...A.btn('outline'), marginTop: '8px', height: '40px', fontSize: '13px' }}>50개 더 보기 ({catLimit} / {visible.length})</button>}
+
+                      <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${THEME.border}` }}>
+                        <p style={{ fontSize: '14px', fontWeight: 'bold', margin: '0 0 4px' }}>손님 화면 분류</p>
+                        <p style={{ ...A.help, margin: '0 0 10px' }}>지금: <strong>{useNewCategory ? '새 분류' : '예전 분류'}</strong> · 새 분류 저장 안 된 상품 {unsaved}개</p>
+                        <button onClick={toggleNewCategory} style={A.btn(useNewCategory ? 'outline' : 'primary')}>{useNewCategory ? '예전 분류로 되돌리기' : '새 분류로 전환'}</button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* 브랜드 관리 */}
