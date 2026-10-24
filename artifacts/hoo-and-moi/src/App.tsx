@@ -341,7 +341,9 @@ export default function App() {
   const [collectBox, setCollectBox] = useState<any[]>(() => { try { const v = JSON.parse(localStorage.getItem(COLLECT_BOX_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } });
   const [collectPicked, setCollectPicked] = useState<Record<string, boolean>>({});
   const [collectRule, setCollectRule] = useState<'consumer' | 'rate'>('consumer');
-  const [collectRate, setCollectRate] = useState(160);
+  // 배율 칸은 자유롭게 입력, 계산할 때만 100~400% 안으로 (입력 중에 고치면 150 → 400 이 되는 문제 방지)
+  const [collectRateInput, setCollectRateInput] = useState('160');
+  const collectRate = Math.max(100, Math.min(400, parseInt(collectRateInput) || 160));
   const [isRegistering, setIsRegistering] = useState(false);
   const [storageUsage, setStorageUsage] = useState<any>(null);
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
@@ -2491,7 +2493,7 @@ export default function App() {
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
                       <button onClick={() => setCollectRule('consumer')} style={chipStyle(collectRule === 'consumer', 'sub')}>소비자가 그대로</button>
                       <button onClick={() => setCollectRule('rate')} style={chipStyle(collectRule === 'rate', 'sub')}>원가 ×</button>
-                      <input type="number" inputMode="numeric" value={collectRate} onChange={e => setCollectRate(Math.max(100, Math.min(400, parseInt(e.target.value) || 100)))} style={{ ...A.input, width: '84px', height: '36px' }} />
+                      <input type="number" inputMode="numeric" value={collectRateInput} onChange={e => setCollectRateInput(e.target.value)} onBlur={() => setCollectRateInput(String(collectRate))} style={{ ...A.input, width: '84px', height: '36px' }} />
                       <span style={{ fontSize: '13px' }}>%</span>
                       <button onClick={() => setCollectBox(prev => prev.map((it: any) => ({ ...it, price: collectPrice(it, collectRule, collectRate) })))} style={A.smallBtn('dark')}>전체에 적용</button>
                     </div>
@@ -2532,7 +2534,7 @@ export default function App() {
                             </div>
                           </div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', fontSize: '11px', color: THEME.subText }}>
-                            <label>판매가 <input type="number" inputMode="numeric" value={price} onChange={e => updateCollected(it.source_id, { price: parseInt(e.target.value) || 0 })} style={small} /></label>
+                            <label>판매가 <input type="number" inputMode="numeric" value={it.price === '' ? '' : price} onChange={e => updateCollected(it.source_id, { price: e.target.value === '' ? '' : (parseInt(e.target.value) || 0) })} onBlur={() => { if (it.price === '') updateCollected(it.source_id, { price: 0 }); }} style={small} /></label>
                             <label>원가 (소비자가 {it.consumer_price.toLocaleString()}) <input type="number" inputMode="numeric" value={it.cost_price} onChange={e => updateCollected(it.source_id, { cost_price: parseInt(e.target.value) || 0 })} style={small} /></label>
                           </div>
                           <input value={it.colors} placeholder="색상" onChange={e => updateCollected(it.source_id, { colors: e.target.value })} style={small} title="색상" />
