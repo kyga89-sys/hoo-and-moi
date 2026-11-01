@@ -119,7 +119,7 @@
     var hasCards = cards().length > 0;
     box.querySelector('[data-sec="list"]').style.display = hasCards ? '' : 'none';
     $('send-picked').style.display = hasCards ? '' : 'none';
-    $('send-cate').style.display = /cate_no=\d+/.test(here().search) ? '' : 'none';
+    $('send-cate').style.display = hasCards && /[?&](cate_no|keyword)=/.test(here().search) ? '' : 'none';
     if (frameObs) frameObs.disconnect();
     var pend = 0;
     frameObs = new MutationObserver(function (muts) {
@@ -138,8 +138,10 @@
     var pc = r.querySelectorAll('ul.prdList > li[id^="anchorBoxId_"]');
     if (pc.length) return Array.prototype.slice.call(pc);
     // 모바일 화면(m.gi-rin.com): 상품 목록 칸 안의 li
-    return Array.prototype.slice.call(r.querySelectorAll('.xans-product-listnormal li.xans-record-, .xans-product-listmain li.xans-record-, .xans-product-listnew li.xans-record-'))
-      .filter(function (li) { return li.querySelector('img') && noOf(li); });
+    // (분류·검색결과·브랜드 목록 모두: 상품 목록 ul.grid2 / 검색결과 칸 / 기존 목록 칸)
+    var mo = r.querySelectorAll('.xans-product-listnormal li.xans-record-, .xans-product-listmain li.xans-record-, .xans-product-listnew li.xans-record-, .xans-search-result li.xans-record-, ul.grid2 > li.xans-record-');
+    return Array.prototype.slice.call(mo)
+      .filter(function (li) { return !li.closest('[class*="layout-category"]') && li.querySelector('img') && noOf(li); });
   }
   function noOf(li) {
     var m = (li.id || '').match(/anchorBoxId_(\d+)/);
@@ -377,13 +379,15 @@
   }
   var MAX_PAGES = 50; // 한 번에 최대 50페이지(약 1,000개) — 수집함이 넘치지 않도록
   async function allCategoryNos(from, count) {
-    var cate = (here().search.match(/cate_no=(\d+)/) || [])[1];
-    if (!cate) throw new Error('분류 목록 화면에서 눌러 주세요.');
+    var hl = here();
+    if (!/[?&](cate_no|keyword)=/.test(hl.search)) throw new Error('분류 목록이나 검색 결과 화면에서 눌러 주세요.');
     var nos = [], page = from, seen = {};
     lastSoldSkipped = 0;
     while (page < from + count) {
       status('목록 읽는 중… ' + page + '페이지 (' + (page - from + 1) + '/' + count + ', ' + nos.length + '개)');
-      var html = await fetch('/product/list.html?cate_no=' + cate + '&page=' + page, { credentials: 'include' }).then(function (r) { return r.text(); });
+      // 지금 보는 목록 주소(분류·검색·브랜드)에서 page 만 바꿔 읽음
+      var pu = new URL(hl.href); pu.searchParams.set('page', page);
+      var html = await fetch(pu.pathname + pu.search, { credentials: 'include' }).then(function (r) { return r.text(); });
       var pdoc = new DOMParser().parseFromString(html, 'text/html');
       // 상품 카드가 아예 없을 때만 끝 (품절만 있는 페이지도 다음 페이지는 계속 읽음)
       var all = cards(pdoc).map(noOf).filter(function (n) { return n && !seen[n]; });
