@@ -236,7 +236,6 @@ const NEW_CATEGORIES: Record<string, string[]> = {
   '한복': [], '수영복': [], '신발': [],
   '잡화': ['모자', '헤어', '양말/레그워머', '목도리/워머', '가방', '기타']
 };
-const NEW_CATEGORY_OPTIONS = Object.entries(NEW_CATEGORIES).flatMap(([main, subs]) => subs.length ? subs.map(s => `${main} > ${s}`) : [main]);
 // 예전 분류 중 기획전(분류가 아니라 태그로 옮김)
 const PROMO_OLD_CATEGORIES = ['NEW 할로윈특가', 'CON 콘신상'];
 // 예전 분류 → 새 분류 (그대로 옮겨도 되는 것)
@@ -485,12 +484,14 @@ export default function App() {
 
   // --- 카테고리/브랜드 관리 상태 ---
   const [newBrand, setNewBrand] = useState('');
+  const [newPromo, setNewPromo] = useState('');
+  const [manageBusy, setManageBusy] = useState(false);
   const [brandSearch, setBrandSearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState<Record<string, boolean>>({ shop: true });
 
   // --- 홈 화면 배치 (분류 탭·브랜드 순서는 store_settings.home_layout, 상품 순서는 products.display_order) ---
-  const [homeLayout, setHomeLayout] = useState<{ category_order?: string[]; brand_order?: string[] }>({});
+  const [homeLayout, setHomeLayout] = useState<{ category_order?: string[]; brand_order?: string[]; promo_list?: string[]; category_tree?: Record<string, string[]> }>({});
   const [layoutCats, setLayoutCats] = useState<string[] | null>(null);
   const [layoutBrands, setLayoutBrands] = useState<string[] | null>(null);
   const [layoutProducts, setLayoutProducts] = useState<any[] | null>(null);
@@ -775,10 +776,13 @@ export default function App() {
   };
   // 새 분류로 전환했으면 새 분류(category2), 아니면 예전 분류(category)
   const catOf = (p: any): string => (useNewCategory ? p.category2 : p.category) || '';
-  const categoryTree: Record<string, string[]> = useNewCategory ? NEW_CATEGORIES : getCombinedCategories();
+  // 새 분류 목록: 관리자가 설정에서 고친 목록(home_layout.category_tree)이 있으면 그것, 없으면 기본 목록
+  const newCatTree: Record<string, string[]> = homeLayout.category_tree && Object.keys(homeLayout.category_tree).length ? homeLayout.category_tree : NEW_CATEGORIES;
+  const newCatOptions: string[] = Object.entries(newCatTree).flatMap(([main, subs]) => subs.length ? subs.map(s => `${main} > ${s}`) : [main]);
+  const categoryTree: Record<string, string[]> = useNewCategory ? newCatTree : getCombinedCategories();
 
   // 🏷️ 홈 탭: 상품이 있는 분류만, 정해진 순서대로 (기타는 맨 뒤)
-  const MAIN_CAT_ORDER = useNewCategory ? Object.keys(NEW_CATEGORIES) : ['아우터', '탑', '바지', '하의', '원피스', '스커트', '상하 세트', '홈웨어', '베이비', '한복', '수영복', '슈즈', '악세사리'];
+  const MAIN_CAT_ORDER = useNewCategory ? Object.keys(newCatTree) : ['아우터', '탑', '바지', '하의', '원피스', '스커트', '상하 세트', '홈웨어', '베이비', '한복', '수영복', '슈즈', '악세사리'];
   const catRank = (name: string) => name === '기타' ? 999 : (MAIN_CAT_ORDER.indexOf(name) === -1 ? 500 : MAIN_CAT_ORDER.indexOf(name));
   const mainCatCounts: Record<string, number> = {};
   const subCatCounts: Record<string, number> = {};
@@ -793,11 +797,13 @@ export default function App() {
   const homeMainCats = orderBySaved(Object.keys(mainCatCounts).sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'ko')), c => c, homeLayout.category_order);
   const homeSubCats = activeLargeCat === '전체' ? [] : Object.keys(subCatCounts)
     .filter(k => k.startsWith(`${activeLargeCat} > `)).map(k => k.slice(activeLargeCat.length + 3))
-    .sort((a, b) => { const o = useNewCategory ? (NEW_CATEGORIES[activeLargeCat] || []) : []; const ia = o.indexOf(a), ib = o.indexOf(b); return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b, 'ko'); });
+    .sort((a, b) => { const o = useNewCategory ? (newCatTree[activeLargeCat] || []) : []; const ia = o.indexOf(a), ib = o.indexOf(b); return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b, 'ko'); });
   // 기획전 태그 (새 분류로 전환했을 때 홈 탭에 표시)
   const tagCounts: Record<string, number> = {};
   if (useNewCategory) products.forEach(p => (p.tags || []).forEach((t: string) => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
-  const homeTags = Object.keys(tagCounts).sort((a, b) => a.localeCompare(b, 'ko'));
+  // 기획전 목록: 설정에서 관리하는 목록(순서 유지) + 상품에 붙어 있는 태그
+  const promoList: string[] = Array.from(new Set([...(homeLayout.promo_list || []), ...products.flatMap((p: any) => p.tags || [])]));
+  const homeTags = promoList.filter(t => tagCounts[t]);
   const homeBrands = orderBySaved(Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko')), b => b.name, homeLayout.brand_order);
 
   const showBrandRow = brandTabOpen || activeBrand !== '전체';
@@ -972,6 +978,143 @@ export default function App() {
   const deleteCategory = async (id: number) => { if (window.confirm("정말 삭제하시겠습니까?")) { await supabase.from('categories').delete().eq('id', id); fetchCategories(); } };
   const addBrand = async () => { if(newBrand) { await supabase.from('brands').insert([{ name: newBrand }]); setNewBrand(''); fetchBrands(); } };
   const deleteBrand = async (id: number) => { if (window.confirm("삭제하시겠습니까?")) { await supabase.from('brands').delete().eq('id', id); fetchBrands(); } };
+
+  // ✏️ 기획전·분류·브랜드 이름 바꾸기/삭제: 홈 배치 칸(home_layout)에 목록을 저장하고, 상품에 적힌 값도 같이 바꿈
+  const saveLayoutPatch = async (patch: Record<string, any>) => {
+    if (!bankInfo.id) { alert("쇼핑몰 설정을 먼저 저장해주세요."); return false; }
+    const next = { ...homeLayout, ...patch };
+    const { error } = await supabase.from('store_settings').update({ home_layout: next }).eq('id', bankInfo.id);
+    if (error) { alert("저장 실패: " + error.message + layoutSqlHint); return false; }
+    setHomeLayout(next);
+    return true;
+  };
+  const updateProductsBatch = async (items: { id: any; patch: any }[]) => {
+    for (let i = 0; i < items.length; i += 15) {
+      const res = await Promise.all(items.slice(i, i + 15).map(it => supabase.from('products').update(it.patch).eq('id', it.id)));
+      const bad = res.find(r => r.error);
+      if (bad && bad.error) throw bad.error;
+    }
+  };
+  const askNewName = (label: string, old: string): string | null => {
+    const input = window.prompt(`${label} 새 이름`, old);
+    if (input === null) return null;
+    const name = input.trim();
+    if (!name || name === old) return null;
+    if (name.includes(',') || name.includes('>')) { alert("이름에 쉼표(,)와 > 는 쓸 수 없습니다."); return null; }
+    return name;
+  };
+
+  // 🎁 기획전
+  const addPromo = async () => {
+    const name = newPromo.trim();
+    if (!name) return alert("기획전 이름을 입력해주세요.");
+    if (name.includes(',')) return alert("이름에 쉼표(,)는 쓸 수 없습니다.");
+    if (promoList.includes(name)) return alert("이미 있는 기획전입니다.");
+    if (await saveLayoutPatch({ promo_list: [...promoList, name] })) setNewPromo('');
+  };
+  const renamePromo = async (old: string) => {
+    const name = askNewName(`기획전 '${old}' 의`, old);
+    if (!name) return;
+    if (promoList.includes(name) && !window.confirm(`이미 '${name}' 기획전이 있습니다. 두 기획전을 합칠까요?`)) return;
+    setManageBusy(true);
+    try {
+      await updateProductsBatch(products.filter((p: any) => (p.tags || []).includes(old)).map((p: any) => ({ id: p.id, patch: { tags: Array.from(new Set((p.tags || []).map((t: string) => t === old ? name : t))) } })));
+      await saveLayoutPatch({ promo_list: Array.from(new Set(promoList.map(t => t === old ? name : t))) });
+      if (activeTag === old) setActiveTag(name);
+      await fetchProducts();
+    } catch (e: any) { alert("이름 변경 실패: " + e.message); } finally { setManageBusy(false); }
+  };
+  const deletePromo = async (name: string) => {
+    const targets = products.filter((p: any) => (p.tags || []).includes(name));
+    if (!window.confirm(`기획전 '${name}' 을(를) 삭제합니다.\n상품 ${targets.length.toLocaleString()}개에서 이 기획전 표시만 빠지고, 상품은 그대로 남습니다.`)) return;
+    setManageBusy(true);
+    try {
+      await updateProductsBatch(targets.map((p: any) => ({ id: p.id, patch: { tags: (p.tags || []).filter((t: string) => t !== name) } })));
+      await saveLayoutPatch({ promo_list: promoList.filter(t => t !== name) });
+      if (activeTag === name) setActiveTag('');
+      await fetchProducts();
+    } catch (e: any) { alert("삭제 실패: " + e.message); } finally { setManageBusy(false); }
+  };
+
+  // 🗂️ 새 분류(대분류 > 중분류) — 목록은 home_layout.category_tree, 상품 값은 products.category2
+  const treeCopy = (): Record<string, string[]> => JSON.parse(JSON.stringify(newCatTree));
+  const renameCategoryValues = async (oldVal: string, newVal: string) => {
+    const { error } = await supabase.from('products').update({ category2: newVal }).eq('category2', oldVal);
+    if (error) throw error;
+  };
+  const addNewCat = async (main: string, sub: string) => {
+    main = (main || '').trim(); sub = (sub || '').trim();
+    if (!main) return alert("대분류를 입력해주세요.");
+    if (main.includes('>') || sub.includes('>')) return alert("이름에 > 는 쓸 수 없습니다.");
+    const t = treeCopy();
+    if (!sub && t[main]) return alert("이미 있는 대분류입니다.");
+    if (!t[main]) t[main] = [];
+    if (sub) { if (t[main].includes(sub)) return alert("이미 있는 중분류입니다."); t[main].push(sub); }
+    if (await saveLayoutPatch({ category_tree: t })) { setNewMainCat(''); if (sub) setNewSubCats({ ...newSubCats, [main]: '' }); }
+  };
+  const renameNewMain = async (main: string) => {
+    const name = askNewName(`대분류 '${main}' 의`, main);
+    if (!name) return;
+    const t = treeCopy();
+    if (t[name] && !window.confirm(`이미 '${name}' 대분류가 있습니다. 두 대분류를 합칠까요?`)) return;
+    setManageBusy(true);
+    try {
+      const next: Record<string, string[]> = {};
+      Object.entries(t).forEach(([k, v]) => { const key = k === main ? name : k; next[key] = Array.from(new Set([...(next[key] || []), ...v])); });
+      const olds = Array.from(new Set(products.map((p: any) => p.category2).filter((c: string) => c && (c === main || c.startsWith(`${main} > `))))) as string[];
+      for (const oldVal of olds) await renameCategoryValues(oldVal, name + oldVal.slice(main.length));
+      const patch: Record<string, any> = { category_tree: next };
+      if (homeLayout.category_order) patch.category_order = Array.from(new Set(homeLayout.category_order.map(c => c === main ? name : c)));
+      await saveLayoutPatch(patch);
+      if (activeLargeCat === main) setActiveLargeCat(name);
+      await fetchProducts();
+    } catch (e: any) { alert("이름 변경 실패: " + e.message); } finally { setManageBusy(false); }
+  };
+  const renameNewSub = async (main: string, sub: string) => {
+    const name = askNewName(`중분류 '${sub}' 의`, sub);
+    if (!name) return;
+    const t = treeCopy();
+    if (t[main].includes(name) && !window.confirm(`'${main}' 안에 이미 '${name}' 이(가) 있습니다. 합칠까요?`)) return;
+    setManageBusy(true);
+    try {
+      t[main] = Array.from(new Set(t[main].map(x => x === sub ? name : x)));
+      await renameCategoryValues(`${main} > ${sub}`, `${main} > ${name}`);
+      await saveLayoutPatch({ category_tree: t });
+      await fetchProducts();
+    } catch (e: any) { alert("이름 변경 실패: " + e.message); } finally { setManageBusy(false); }
+  };
+  const deleteNewMain = async (main: string) => {
+    const cnt = mainCatCounts[main] || 0;
+    if (cnt > 0) return alert(`'${main}' 에 상품 ${cnt.toLocaleString()}개가 있어 삭제할 수 없습니다.\n상품을 다른 분류로 옮기거나, 이름 바꾸기로 다른 대분류와 합쳐주세요.`);
+    if (!window.confirm(`대분류 '${main}' 을(를) 삭제할까요? (상품이 없는 분류입니다)`)) return;
+    const t = treeCopy(); delete t[main];
+    await saveLayoutPatch({ category_tree: t });
+  };
+  const deleteNewSub = async (main: string, sub: string) => {
+    const cnt = subCatCounts[`${main} > ${sub}`] || 0;
+    if (cnt > 0) return alert(`'${main} > ${sub}' 에 상품 ${cnt.toLocaleString()}개가 있어 삭제할 수 없습니다.\n상품을 다른 분류로 옮기거나, 이름 바꾸기로 다른 중분류와 합쳐주세요.`);
+    if (!window.confirm(`중분류 '${sub}' 을(를) 삭제할까요? (상품이 없는 분류입니다)`)) return;
+    const t = treeCopy(); t[main] = t[main].filter(x => x !== sub);
+    await saveLayoutPatch({ category_tree: t });
+  };
+
+  // 🏷️ 브랜드 이름 바꾸기 (상품에 적힌 브랜드도 같이 바뀜)
+  const renameBrand = async (b: any) => {
+    const name = askNewName(`브랜드 '${b.name}' 의`, b.name);
+    if (!name) return;
+    const exist = brands.find((x: any) => x.name === name && x.id !== b.id);
+    if (exist && !window.confirm(`이미 '${name}' 브랜드가 있습니다. 두 브랜드를 합칠까요?`)) return;
+    setManageBusy(true);
+    try {
+      const r1 = await supabase.from('products').update({ brand: name }).eq('brand', b.name);
+      if (r1.error) throw r1.error;
+      const r2 = exist ? await supabase.from('brands').delete().eq('id', b.id) : await supabase.from('brands').update({ name }).eq('id', b.id);
+      if (r2.error) throw r2.error;
+      if (homeLayout.brand_order?.includes(b.name)) await saveLayoutPatch({ brand_order: Array.from(new Set(homeLayout.brand_order.map(x => x === b.name ? name : x))) });
+      if (activeBrand === b.name) setActiveBrand(name);
+      await Promise.all([fetchBrands(), fetchProducts()]);
+    } catch (e: any) { alert("이름 변경 실패: " + e.message); } finally { setManageBusy(false); }
+  };
 
   const handleSaveProduct = async () => {
     if (!prodName || !prodPrice) return alert("상품명, 판매 가격은 필수입니다!");
@@ -2580,7 +2723,7 @@ export default function App() {
             const picked = collectBox.filter((it: any) => collectPicked[it.source_id]);
             const pickedIds = picked.map((it: any) => it.source_id);
             const fresh = collectBox.filter((it: any) => !existingSourceIds.has(it.source_id));
-            const catOptions = NEW_CATEGORY_OPTIONS;
+            const catOptions = newCatOptions;
             return (
               <div>
                 <div style={A.card}>
@@ -2780,12 +2923,29 @@ export default function App() {
                       <label style={A.label}>새 분류 {useNewCategory && <span style={{ color: THEME.primary }}>*</span>}</label>
                       <select value={prodCategory2} onChange={e => setProdCategory2(e.target.value)} style={A.input}>
                         <option value="">새 분류 선택</option>
-                        {NEW_CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                        {newCatOptions.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label style={A.label}>기획전 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(쉼표로 여러 개)</span></label>
-                      <input placeholder="예: NEW 할로윈특가" value={prodTags} onChange={e => setProdTags(e.target.value)} style={A.input} />
+                      <label style={A.label}>기획전 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(해당되는 것 체크)</span></label>
+                      {(() => {
+                        const picked = prodTags.split(',').map(t => t.trim()).filter(Boolean);
+                        const list = Array.from(new Set([...promoList, ...picked]));
+                        if (list.length === 0) return <p style={{ ...A.help, margin: '8px 0 0' }}>등록된 기획전이 없습니다. 설정 &gt; 기획전 관리에서 먼저 만들어주세요.</p>;
+                        return (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingTop: '4px' }}>
+                            {list.map(t => {
+                              const on = picked.includes(t);
+                              return (
+                                <label key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '36px', padding: '0 12px', borderRadius: '18px', fontSize: '13px', cursor: 'pointer', border: `1px solid ${on ? THEME.primary : THEME.border}`, backgroundColor: on ? THEME.primaryLight : '#fff', color: on ? THEME.primary : THEME.text }}>
+                                  <input type="checkbox" checked={on} onChange={() => setProdTags((on ? picked.filter(x => x !== t) : [...picked, t]).join(','))} style={{ accentColor: THEME.primary }} />
+                                  🎁 {t}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -3322,7 +3482,7 @@ export default function App() {
                   const shown = visible.slice(0, catLimit);
                   const changedCount = Object.keys(catDrafts).length;
                   const unsaved = counts.auto + counts.guess + counts.none;
-                  const allTags = Array.from(new Set([...PROMO_OLD_CATEGORIES, ...products.flatMap(p => p.tags || [])]));
+                  const allTags = Array.from(new Set([...PROMO_OLD_CATEGORIES, ...promoList]));
                   const setDraft = (id: string, v: { category2: string; tags: string[] }) => setCatDrafts(d => ({ ...d, [id]: v }));
                   const saveRows = async (list: typeof rows) => {
                     const items = list.filter(r => r.value.category2).map(r => ({ id: r.p.id, category2: r.value.category2, tags: r.value.tags }));
@@ -3381,7 +3541,7 @@ export default function App() {
                               <p style={{ fontSize: '13px', margin: '1px 0 5px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
                               <select value={value.category2} onChange={e => setDraft(p.id, { ...value, category2: e.target.value })} style={{ ...A.input, height: '34px', fontSize: '12.5px', marginBottom: '5px' }}>
                                 <option value="">새 분류 선택</option>
-                                {NEW_CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                                {newCatOptions.map(c => <option key={c} value={c}>{c}</option>)}
                               </select>
                               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                                 {allTags.map(t => {
@@ -3405,9 +3565,37 @@ export default function App() {
                 })()}
               </div>
 
+              {/* 기획전 관리 */}
+              <div style={A.card}>
+                {settingsHeader('promo', `기획전 관리 (${promoList.length})`, '추가 · 이름 변경 · 삭제 (홈 화면 🎁 탭)')}
+                {settingsOpen.promo && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                      <input placeholder="새 기획전 이름 (예: NEW 할로윈특가)" value={newPromo} onChange={e => setNewPromo(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addPromo(); }} style={{ ...A.input, flex: 1, minWidth: 0 }} />
+                      <button onClick={addPromo} disabled={manageBusy} style={A.btn('dark', false)}>추가</button>
+                    </div>
+                    <div style={{ border: `1px solid ${THEME.border}`, borderRadius: '12px', overflow: 'hidden' }}>
+                      {promoList.length === 0 && <p style={{ fontSize: '13px', color: THEME.subText, margin: '14px', textAlign: 'center' }}>등록된 기획전이 없습니다.</p>}
+                      {promoList.map((t, idx) => {
+                        const cnt = products.filter((p: any) => (p.tags || []).includes(t)).length;
+                        return (
+                          <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '44px', padding: '0 12px', borderTop: idx === 0 ? 'none' : `1px solid ${THEME.border}`, fontSize: '13.5px' }}>
+                            <span style={{ flex: 1, minWidth: 0, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎁 {t}</span>
+                            <span style={{ fontSize: '12px', color: THEME.subText }}>{cnt.toLocaleString()}개</span>
+                            <button disabled={manageBusy} onClick={() => renamePromo(t)} aria-label={`${t} 이름 변경`} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Edit size={15} color={THEME.subText} /></button>
+                            <button disabled={manageBusy} onClick={() => deletePromo(t)} aria-label={`${t} 삭제`} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p style={{ ...A.help, marginTop: '8px' }}>상품에 기획전을 붙이는 곳은 상품 등록·수정 화면의 "기획전" 체크칸입니다. 삭제해도 상품은 그대로 남고 기획전 표시만 빠집니다. 상품이 하나도 없는 기획전은 홈 화면에 탭이 보이지 않습니다.</p>
+                  </div>
+                )}
+              </div>
+
               {/* 브랜드 관리 */}
               <div style={A.card}>
-                {settingsHeader('brand', `브랜드 관리 (${brands.length})`, '추가 · 검색 · 삭제')}
+                {settingsHeader('brand', `브랜드 관리 (${brands.length})`, '추가 · 검색 · 이름 변경 · 삭제')}
                 {settingsOpen.brand && (
                   <div style={{ marginTop: '16px' }}>
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -3426,7 +3614,8 @@ export default function App() {
                         <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px', padding: '0 6px 0 12px', backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '10px', minWidth: 0 }}>
                           <span style={{ flex: 1, minWidth: 0, fontSize: '13.5px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
                           <span style={{ flexShrink: 0, fontSize: '12px', color: THEME.subText }}>{brandCounts[b.name] || 0}개</span>
-                          <button onClick={() => deleteBrand(b.id)} aria-label={`${b.name} 삭제`} style={{ flexShrink: 0, background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button>
+                          <button disabled={manageBusy} onClick={() => renameBrand(b)} aria-label={`${b.name} 이름 변경`} style={{ flexShrink: 0, background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Edit size={15} color={THEME.subText} /></button>
+                          <button onClick={() => { const n = brandCounts[b.name] || 0; if (n > 0 && !window.confirm(`'${b.name}' 상품이 ${n.toLocaleString()}개 있습니다. 브랜드 목록에서만 지우고 상품은 그대로 남습니다. 계속할까요?`)) return; deleteBrand(b.id); }} aria-label={`${b.name} 삭제`} style={{ flexShrink: 0, background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button>
                         </div>
                       ))}
                     </div>
@@ -3436,12 +3625,12 @@ export default function App() {
 
               {/* 카테고리 관리 */}
               <div style={A.card}>
-                {settingsHeader('category', '분류(카테고리) 관리', '대분류 · 중분류 추가와 삭제')}
+                {settingsHeader('category', '분류(카테고리) 관리', useNewCategory ? '대분류 · 중분류 추가 · 이름 변경 · 삭제' : '대분류 · 중분류 추가와 삭제')}
                 {settingsOpen.category && (
                   <div style={{ marginTop: '16px' }}>
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                       <input placeholder="새 대분류 이름" value={newMainCat} onChange={e => setNewMainCat(e.target.value)} style={{ ...A.input, flex: 1, minWidth: 0 }} />
-                      <button onClick={() => addCategory(newMainCat, '')} style={A.btn('dark', false)}>생성</button>
+                      <button disabled={manageBusy} onClick={() => useNewCategory ? addNewCat(newMainCat, '') : addCategory(newMainCat, '')} style={A.btn('dark', false)}>생성</button>
                     </div>
                     <div style={{ border: `1px solid ${THEME.border}`, borderRadius: '12px', overflow: 'hidden' }}>
                       {Object.keys(categoryTree).sort((a, b) => catRank(a) - catRank(b) || a.localeCompare(b, 'ko')).map((mainCat, idx) => {
@@ -3455,19 +3644,30 @@ export default function App() {
                             </button>
                             {isExpanded && (
                               <div style={{ padding: '6px 14px 14px', backgroundColor: '#fdfdfd' }}>
+                                {useNewCategory && (
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', margin: '8px 0 4px' }}>
+                                    <button disabled={manageBusy} onClick={() => renameNewMain(mainCat)} style={A.smallBtn('outline')}><Edit size={12} /> 대분류 이름 변경</button>
+                                    <button disabled={manageBusy} onClick={() => deleteNewMain(mainCat)} style={A.smallBtn('danger')}><Trash2 size={12} /> 대분류 삭제</button>
+                                  </div>
+                                )}
                                 {categoryTree[mainCat].length > 0 ? categoryTree[mainCat].map(sub => {
                                   const targetCat = categories.find(c => c.name === `${mainCat} > ${sub}`);
                                   return (
                                     <div key={sub} style={{ display: 'flex', alignItems: 'center', height: '38px', borderBottom: `1px dashed ${THEME.border}`, fontSize: '13.5px' }}>
                                       <span style={{ flex: 1 }}>{sub}</span>
                                       <span style={{ fontSize: '12px', color: THEME.subText, marginRight: '8px' }}>{subCatCounts[`${mainCat} > ${sub}`] || 0}개</span>
-                                      {targetCat ? <button onClick={() => deleteCategory(targetCat.id)} aria-label={`${sub} 삭제`} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button> : <span style={{ fontSize: '11px', color: THEME.subText }}>기본</span>}
+                                      {useNewCategory ? (
+                                        <>
+                                          <button disabled={manageBusy} onClick={() => renameNewSub(mainCat, sub)} aria-label={`${sub} 이름 변경`} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Edit size={15} color={THEME.subText} /></button>
+                                          <button disabled={manageBusy} onClick={() => deleteNewSub(mainCat, sub)} aria-label={`${sub} 삭제`} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button>
+                                        </>
+                                      ) : targetCat ? <button onClick={() => deleteCategory(targetCat.id)} aria-label={`${sub} 삭제`} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color="#c62828" /></button> : <span style={{ fontSize: '11px', color: THEME.subText }}>기본</span>}
                                     </div>
                                   );
                                 }) : <p style={{ fontSize: '13px', color: THEME.subText, margin: '8px 0' }}>등록된 중분류가 없습니다.</p>}
                                 <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
                                   <input placeholder={`'${mainCat}' 안에 중분류 추가`} value={newSubCats[mainCat] || ''} onChange={e => setNewSubCats({...newSubCats, [mainCat]: e.target.value})} style={{ ...A.input, height: '38px', fontSize: '13px', flex: 1, minWidth: 0 }} />
-                                  <button onClick={() => addCategory(mainCat, newSubCats[mainCat])} style={A.smallBtn('dark')}>추가</button>
+                                  <button disabled={manageBusy} onClick={() => useNewCategory ? addNewCat(mainCat, newSubCats[mainCat]) : addCategory(mainCat, newSubCats[mainCat])} style={A.smallBtn('dark')}>추가</button>
                                 </div>
                               </div>
                             )}
