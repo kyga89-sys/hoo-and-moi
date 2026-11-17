@@ -46,7 +46,7 @@ declare n integer;
 begin
   if not public.is_admin() then raise exception '관리자만 사용할 수 있습니다.'; end if;
   with ins as (
-    insert into public.products
+    insert into public.products overriding system value
     select (jsonb_populate_record(null::public.products, t.data)).*
     from public.products_trash t where t.id = any (p_ids)
     on conflict (id) do nothing
