@@ -456,6 +456,8 @@ export default function App() {
   const [adminEditCategory, setAdminEditCategory] = useState('전체');
   const [adminEditStatus, setAdminEditStatus] = useState('전체'); // 전체 / 판매중 / 품절
   const [adminEditPage, setAdminEditPage] = useState(1);
+  const [adminPicked, setAdminPicked] = useState<Record<string, boolean>>({}); // 선택·일괄 삭제용 체크
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // --- 상품 등록/수정 상태 ---
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -1025,6 +1027,44 @@ export default function App() {
     setProducts(prev => prev.map(x => x.id === p.id ? { ...x, is_soldout: next } : x));
   };
   const deleteProduct = async (id: string) => { if (window.confirm("상품을 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); } };
+
+  // 여러 상품 한 번에 삭제: 개수·상품명 확인 → (20개 이상이면 '삭제' 직접 입력) → 백업 파일 저장 → 100개씩 삭제
+  const bulkDeleteProducts = async (targets: any[], label: string) => {
+    if (bulkDeleting || targets.length === 0) return;
+    const sample = targets.slice(0, 3).map(p => `· ${p.brand ? p.brand + ' ' : ''}${p.name}`).join('\n');
+    const more = targets.length > 3 ? `\n… 외 ${(targets.length - 3).toLocaleString()}개` : '';
+    if (!window.confirm(`${label} ${targets.length.toLocaleString()}개를 삭제합니다.\n\n${sample}${more}\n\n삭제 전에 상품 정보를 백업 파일로 저장합니다. 계속할까요?`)) return;
+    if (targets.length >= 20) {
+      const typed = window.prompt(`상품 ${targets.length.toLocaleString()}개를 지웁니다. 계속하려면 "삭제" 라고 입력하세요.`);
+      if (typed === null || typed.trim() !== '삭제') return alert("취소했습니다. 삭제하지 않았습니다.");
+    }
+    setBulkDeleting(true);
+    try {
+      // 1) 백업 파일 (되돌릴 때 쓰는 원본 줄 그대로)
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+      const blob = new Blob([JSON.stringify(targets, null, 1)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `상품백업-${stamp}-${targets.length}개.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      // 2) 100개씩 삭제
+      const ids = targets.map(p => p.id);
+      let done = 0;
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        const { error } = await supabase.from('products').delete().in('id', chunk);
+        if (error) { alert(`${done.toLocaleString()}개까지 삭제하고 멈췄습니다.\n오류: ${error.message}`); break; }
+        done += chunk.length;
+      }
+      setAdminPicked({});
+      await fetchProducts();
+      if (done === ids.length) alert(`${done.toLocaleString()}개를 삭제했습니다. (백업 파일이 다운로드 폴더에 저장됨)`);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const getExtraPrice = (optStr: string) => {
     if (!optStr) return 0;
@@ -2862,6 +2902,29 @@ export default function App() {
                 <button onClick={() => { setAdminTab('productAdd'); resetProductForm(); }} style={A.smallBtn('dark')}><Plus size={14} /> 새 상품</button>
               </div>
 
+              {/* 선택·일괄 삭제 */}
+              {(() => {
+                const pickedList = products.filter(p => adminPicked[p.id]);
+                const pageAllOn = adminCurrentProducts.length > 0 && adminCurrentProducts.every(p => adminPicked[p.id]);
+                const filtered = adminEditSearch || adminEditBrand !== '전체' || adminEditCategory !== '전체' || adminEditStatus !== '전체';
+                return (
+                  <div style={{ ...A.card, padding: '10px 12px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px' }}>
+                      <button disabled={bulkDeleting || adminCurrentProducts.length === 0} onClick={() => setAdminPicked(prev => { const n = { ...prev }; adminCurrentProducts.forEach(p => { if (pageAllOn) delete n[p.id]; else n[p.id] = true; }); return n; })} style={A.smallBtn('outline')}>{pageAllOn ? '이 페이지 선택 해제' : '이 페이지 모두 선택'}</button>
+                      <button disabled={bulkDeleting || adminDisplayProducts.length === 0} onClick={() => setAdminPicked(prev => { const n = { ...prev }; adminDisplayProducts.forEach(p => { n[p.id] = true; }); return n; })} style={A.smallBtn('outline')}>{filtered ? `검색 결과 ${adminDisplayProducts.length.toLocaleString()}개 모두 선택` : `전체 ${adminDisplayProducts.length.toLocaleString()}개 선택`}</button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px' }}>
+                      <button disabled={bulkDeleting || pickedList.length === 0} onClick={() => setAdminPicked({})} style={A.smallBtn('outline')}>선택 비우기</button>
+                      <button disabled={bulkDeleting || pickedList.length === 0} onClick={() => bulkDeleteProducts(pickedList, '선택한 상품')} style={{ ...A.smallBtn('danger'), opacity: pickedList.length === 0 ? 0.5 : 1 }}><Trash2 size={12} /> {bulkDeleting ? '삭제 중...' : `선택 ${pickedList.length.toLocaleString()}개 삭제`}</button>
+                    </div>
+                    {filtered && adminDisplayProducts.length > 0 && (
+                      <button disabled={bulkDeleting} onClick={() => bulkDeleteProducts(adminDisplayProducts, '검색 결과 전체')} style={{ ...A.smallBtn('danger'), width: '100%' }}><Trash2 size={12} /> 검색 결과 {adminDisplayProducts.length.toLocaleString()}개 전부 삭제</button>
+                    )}
+                    <p style={{ fontSize: '11px', color: THEME.subText, margin: 0 }}>선택 {pickedList.length.toLocaleString()}개 · 페이지를 넘겨도 선택이 유지됩니다 · 삭제 전에 백업 파일이 저장돼요</p>
+                  </div>
+                );
+              })()}
+
               {adminCurrentProducts.length > 0 ? (
                 <>
                   {/* 한 줄에 2개씩: 사진·정보 위, 버튼 3개 아래 */}
@@ -2869,9 +2932,10 @@ export default function App() {
                     {adminCurrentProducts.map((p) => {
                       const margin = (p.price || 0) - (p.cost_price || 0);
                       return (
-                        <div key={p.id} style={{ backgroundColor: '#fff', borderRadius: '14px', border: `1px solid ${THEME.border}`, padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
+                        <div key={p.id} style={{ backgroundColor: adminPicked[p.id] ? '#fff5f5' : '#fff', borderRadius: '14px', border: `${adminPicked[p.id] ? 2 : 1}px solid ${adminPicked[p.id] ? '#c62828' : THEME.border}`, padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
                           <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', minWidth: 0 }}>
                             <div style={{ position: 'relative', flexShrink: 0 }}>
+                              <input type="checkbox" aria-label="상품 선택" checked={!!adminPicked[p.id]} onChange={() => setAdminPicked(prev => { const n = { ...prev }; if (n[p.id]) delete n[p.id]; else n[p.id] = true; return n; })} style={{ position: 'absolute', left: '3px', top: '3px', width: '20px', height: '20px', zIndex: 1, accentColor: '#c62828' }} />
                               <img src={p.main_image} loading="lazy" style={{ width: '56px', height: '70px', objectFit: 'cover', borderRadius: '8px', backgroundColor: '#eee', display: 'block', filter: p.is_soldout ? 'grayscale(1)' : 'none', opacity: p.is_soldout ? 0.6 : 1 }} />
                               {p.is_soldout && <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, textAlign: 'center', backgroundColor: 'rgba(40,40,40,0.85)', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '0 0 8px 8px', padding: '2px 0' }}>품절</span>}
                             </div>
