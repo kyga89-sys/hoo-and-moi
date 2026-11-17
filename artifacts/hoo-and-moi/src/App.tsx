@@ -240,6 +240,17 @@ const NEW_CATEGORIES: Record<string, string[]> = {
 const PROMO_OLD_CATEGORIES = ['NEW 할로윈특가', 'CON 콘신상'];
 // 🚚 바로 배송: 기획전 태그와 같은 칸(tags)에 이 이름으로 저장 (기획전 관리 목록에는 나오지 않음)
 const READY_TAG = '바로배송';
+// 칸별 표시는 '바로배송|색상|사이즈' 로 저장. 칸별 표시가 하나도 없으면 모든 옵션이 바로 배송
+const isReadyTag = (t: string) => t === READY_TAG || t.startsWith(READY_TAG + '|');
+const readyKey = (color: string, size: string) => `${READY_TAG}|${(color || '').trim()}|${(size || '').trim()}`;
+const isReadyOption = (tags: string[] | undefined, color: string, size: string) => {
+  const t = tags || [];
+  if (!t.includes(READY_TAG)) return false;
+  if (/품절/.test(color || '') || /품절/.test(size || '')) return false;
+  const combos = t.filter(x => x.startsWith(READY_TAG + '|'));
+  return combos.length === 0 || combos.includes(readyKey(color, size));
+};
+const optionTokens = (str: string | undefined) => (str || '').split(',').map(x => x.trim()).filter(Boolean);
 // 예전 분류 → 새 분류 (그대로 옮겨도 되는 것)
 const OLD_TO_NEW: Record<string, string> = {
   '아우터 > 코트': '아우터 > 자켓/코트', '아우터 > 자켓': '아우터 > 자켓/코트', '아우터 > 점퍼': '아우터 > 패딩/점퍼',
@@ -804,7 +815,7 @@ export default function App() {
   const tagCounts: Record<string, number> = {};
   if (useNewCategory) products.forEach(p => (p.tags || []).forEach((t: string) => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
   // 기획전 목록: 설정에서 관리하는 목록(순서 유지) + 상품에 붙어 있는 태그
-  const promoList: string[] = Array.from(new Set([...(homeLayout.promo_list || []), ...products.flatMap((p: any) => p.tags || [])])).filter(t => t !== READY_TAG);
+  const promoList: string[] = Array.from(new Set([...(homeLayout.promo_list || []), ...products.flatMap((p: any) => p.tags || [])])).filter(t => !isReadyTag(t));
   const homeTags = promoList.filter(t => tagCounts[t]);
   const homeBrands = orderBySaved(Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko')), b => b.name, homeLayout.brand_order);
 
@@ -1107,7 +1118,7 @@ export default function App() {
     if (!window.confirm(`선택한 상품 ${targets.length.toLocaleString()}개를 바로 배송 ${on ? '상품으로 지정' : '에서 해제'}할까요?`)) return;
     setManageBusy(true);
     try {
-      await updateProductsBatch(targets.map((p: any) => ({ id: p.id, patch: { tags: on ? [...(p.tags || []), READY_TAG] : (p.tags || []).filter((t: string) => t !== READY_TAG) } })));
+      await updateProductsBatch(targets.map((p: any) => ({ id: p.id, patch: { tags: on ? [...(p.tags || []), READY_TAG] : (p.tags || []).filter((t: string) => !isReadyTag(t)) } })));
       setAdminPicked({});
       await fetchProducts();
     } catch (e: any) { alert("저장 실패: " + e.message); } finally { setManageBusy(false); }
@@ -1263,7 +1274,16 @@ export default function App() {
   };
   const removeFromCart = (cartId: number) => { setCart(cart.filter(item => item.cartId !== cartId)); };
 
-  const totalShippingFee = cart.length > 0 ? shopSettings.shipping_fee : 0;
+  // 🚚 바로 배송 상품과 선주문 상품은 배송비를 따로 받음 (서버 create_order 와 같은 규칙)
+  const itemReady = (item: any) => {
+    const live = products.find((p: any) => String(p.id) === String(item.id));
+    return isReadyOption(live ? live.tags : item.tags, item.selectedColor, item.selectedSize);
+  };
+  const cartReadyCount = cart.filter(itemReady).length;
+  const cartPreCount = cart.length - cartReadyCount;
+  const readyShippingFee = cartReadyCount > 0 ? shopSettings.shipping_fee : 0;
+  const preShippingFee = cartPreCount > 0 ? shopSettings.shipping_fee : 0;
+  const totalShippingFee = readyShippingFee + preShippingFee;
   const totalItemAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalOrderAmount = totalItemAmount + totalShippingFee;
 
@@ -2156,7 +2176,7 @@ export default function App() {
           </div>
           <div style={{ padding: '24px 20px' }}>
             {isNewProduct(selectedProduct.created_at) && <span style={{ display: 'inline-block', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px' }}>✨ NEW</span>}
-            {(selectedProduct.tags || []).includes(READY_TAG) && <span style={{ display: 'inline-block', backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px', marginLeft: isNewProduct(selectedProduct.created_at) ? '6px' : 0 }}>🚚 바로 배송</span>}
+            {(selectedProduct.tags || []).includes(READY_TAG) && <span style={{ display: 'inline-block', backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px', marginLeft: isNewProduct(selectedProduct.created_at) ? '6px' : 0 }}>{(selectedProduct.tags || []).some((t: string) => t.startsWith(READY_TAG + '|')) ? '🚚 바로 배송 가능 옵션 있음' : '🚚 바로 배송'}</span>}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
               <h2 style={{ fontSize: '22px', margin: 0, fontWeight: 'bold', lineHeight: '1.4' }}>{selectedProduct.name}</h2>
               <button onClick={handleShareProduct} style={{ backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '50%', width: '36px', height: '36px', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0, marginLeft: '10px' }}>
@@ -2184,9 +2204,11 @@ export default function App() {
               <div style={{ marginBottom: '25px' }}>
                 <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '12px' }}>색상</p>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                  {selectedProduct.colors.split(',').map((c: string) => (
-                    <button key={c} disabled={isOptionSoldOut(c)} onClick={() => setSelectedColor(c.trim())} style={optionBtnStyle(selectedColor === c.trim(), isOptionSoldOut(c), '20px')}>{c.trim()}</button>
-                  ))}
+                  {selectedProduct.colors.split(',').map((c: string) => {
+                    const sizeList = optionTokens(selectedProduct.sizes);
+                    const rdy = (sizeList.length ? sizeList : ['']).some(sz => isReadyOption(selectedProduct.tags, c.trim(), sz));
+                    return <button key={c} disabled={isOptionSoldOut(c)} onClick={() => setSelectedColor(c.trim())} style={{ ...optionBtnStyle(selectedColor === c.trim(), isOptionSoldOut(c), '20px'), ...(rdy && selectedColor !== c.trim() ? { borderColor: '#2e7d32', color: '#2e7d32' } : {}) }}>{c.trim()}{rdy ? ' 🚚' : ''}</button>;
+                  })}
                 </div>
               </div>
             )}
@@ -2194,9 +2216,11 @@ export default function App() {
               <div style={{ marginBottom: '25px' }}>
                 <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '12px' }}>사이즈</p>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                  {selectedProduct.sizes.split(',').map((s: string) => (
-                    <button key={s} disabled={isOptionSoldOut(s)} onClick={() => setSelectedSize(s.trim())} style={optionBtnStyle(selectedSize === s.trim(), isOptionSoldOut(s), '24px')}>{s.trim()}</button>
-                  ))}
+                  {selectedProduct.sizes.split(',').map((s: string) => {
+                    const colorList = selectedColor ? [selectedColor] : optionTokens(selectedProduct.colors);
+                    const rdy = (colorList.length ? colorList : ['']).some(cl => isReadyOption(selectedProduct.tags, cl, s.trim()));
+                    return <button key={s} disabled={isOptionSoldOut(s)} onClick={() => setSelectedSize(s.trim())} style={{ ...optionBtnStyle(selectedSize === s.trim(), isOptionSoldOut(s), '24px'), ...(rdy && selectedSize !== s.trim() ? { borderColor: '#2e7d32', color: '#2e7d32' } : {}) }}>{s.trim()}{rdy ? ' 🚚' : ''}</button>;
+                  })}
                 </div>
               </div>
             )}
@@ -2269,6 +2293,7 @@ export default function App() {
                   <div style={{ flex: 1 }}>
                     <p style={{ margin: '0 0 4px 0', fontSize: '15px', fontWeight: 'bold', color: THEME.text }}>{item.name}</p>
                     {(item.selectedSize || item.selectedColor) && <p style={{ margin: '0 0 6px 0', fontSize: '13px', color: THEME.subText }}>{[item.selectedColor, item.selectedSize].filter(Boolean).join(' / ')}</p>}
+                    {itemReady(item) && <p style={{ margin: '0 0 6px 0', fontSize: '12px', fontWeight: 'bold', color: '#2e7d32' }}>🚚 바로배송</p>}
                     <p style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: 'bold' }}>{(item.price * item.quantity).toLocaleString()}원</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#fff', border: `1px solid ${THEME.border}`, borderRadius: '20px', padding: '4px 10px', width: 'fit-content' }}>
                        <span style={{fontSize:'12px', color:THEME.subText}}>수량: {item.quantity}</span>
@@ -2279,7 +2304,9 @@ export default function App() {
               ))}
 
               <div style={{ padding: '15px', backgroundColor: THEME.primaryLight, borderRadius: '12px', marginTop: '20px', fontSize: '13px', color: THEME.primary, lineHeight: '1.5' }}>
-                📢 <strong>기본 배송비 {shopSettings.shipping_fee.toLocaleString()}원</strong><br/> <span style={{color: THEME.text}}>* 여러 브랜드 주문 시 합배송 등의 이유로 배송비가 추가될 수 있습니다.</span>
+                📢 {cartReadyCount > 0 && cartPreCount > 0
+                  ? <strong>🚚 바로배송 배송비 {readyShippingFee.toLocaleString()}원 + 선주문 배송비 {preShippingFee.toLocaleString()}원 (각각 따로 발송)</strong>
+                  : <strong>기본 배송비 {shopSettings.shipping_fee.toLocaleString()}원</strong>}<br/> <span style={{color: THEME.text}}>* 여러 브랜드 주문 시 합배송 등의 이유로 배송비가 추가될 수 있습니다.</span>
               </div>
 
               <div style={{ marginTop: '30px' }}>
@@ -2345,7 +2372,7 @@ export default function App() {
               <tbody>
                 {cart.map(item => (
                   <tr key={item.cartId} style={{ borderBottom: `1px solid ${THEME.border}` }}>
-                    <td style={{ padding: '15px 0' }}>{item.name} <br/><span style={{ fontSize: '12px', color: THEME.subText }}>{[item.selectedColor, item.selectedSize].filter(Boolean).join(' / ')}</span></td>
+                    <td style={{ padding: '15px 0' }}>{item.name} <br/><span style={{ fontSize: '12px', color: THEME.subText }}>{[item.selectedColor, item.selectedSize].filter(Boolean).join(' / ')}</span>{itemReady(item) && <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#2e7d32', marginLeft: '6px' }}>🚚 바로배송</span>}</td>
                     <td style={{ textAlign: 'center', padding: '15px 0' }}>{item.quantity}</td>
                     <td style={{ textAlign: 'right', padding: '15px 0' }}>{(item.price * item.quantity).toLocaleString()}</td>
                   </tr>
@@ -2354,7 +2381,14 @@ export default function App() {
             </table>
             <div style={{ marginTop: '20px' }}>
                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '10px' }}><span style={{color:THEME.subText}}>상품 합계</span><span style={{fontWeight:'bold'}}>{totalItemAmount.toLocaleString()}원</span></div>
-               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '20px' }}><span style={{color:THEME.subText}}>기본 배송비</span><span style={{fontWeight:'bold'}}>{totalShippingFee.toLocaleString()}원</span></div>
+               {cartReadyCount > 0 && cartPreCount > 0 ? (
+                 <>
+                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '10px' }}><span style={{color:THEME.subText}}>🚚 바로배송 배송비</span><span style={{fontWeight:'bold'}}>{readyShippingFee.toLocaleString()}원</span></div>
+                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '20px' }}><span style={{color:THEME.subText}}>선주문 배송비</span><span style={{fontWeight:'bold'}}>{preShippingFee.toLocaleString()}원</span></div>
+                 </>
+               ) : (
+                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '20px' }}><span style={{color:THEME.subText}}>기본 배송비</span><span style={{fontWeight:'bold'}}>{totalShippingFee.toLocaleString()}원</span></div>
+               )}
                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold', color: THEME.primary, padding: '15px 0', borderTop: `1px solid ${THEME.border}`, backgroundColor: THEME.primaryLight, borderRadius: '8px', paddingLeft:'15px', paddingRight:'15px' }}>
                  <span>최종 견적금액</span><span>{totalOrderAmount.toLocaleString()}원</span>
                </div>
@@ -2970,11 +3004,59 @@ export default function App() {
                 {hasCategory2Column && (() => {
                   const picked = prodTags.split(',').map(t => t.trim()).filter(Boolean);
                   const ready = picked.includes(READY_TAG);
+                  const base = picked.filter(t => !isReadyTag(t));
+                  const colorsT = optionTokens(prodColors), sizesT = optionTokens(prodSizes);
+                  const rowsC = colorsT.length ? colorsT : [''], colsS = sizesT.length ? sizesT : [''];
+                  const allKeys = rowsC.flatMap(c => colsS.map(sz => readyKey(c, sz)));
+                  const combos = picked.filter(t => t.startsWith(READY_TAG + '|'));
+                  const isOn = (c: string, sz: string) => ready && (combos.length === 0 || combos.includes(readyKey(c, sz)));
+                  const writeSet = (set: Set<string>) => {
+                    if (set.size === 0) setProdTags(base.join(','));
+                    else if (set.size === allKeys.length) setProdTags([...base, READY_TAG].join(','));
+                    else setProdTags([...base, READY_TAG, ...allKeys.filter(k => set.has(k))].join(','));
+                  };
+                  const toggleCell = (c: string, sz: string) => {
+                    const cur = new Set(allKeys.filter(k => ready && (combos.length === 0 || combos.includes(k))));
+                    const k = readyKey(c, sz);
+                    if (cur.has(k)) cur.delete(k); else cur.add(k);
+                    writeSet(cur);
+                  };
+                  const showMatrix = ready && allKeys.length > 1;
                   return (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', height: '48px', padding: '0 14px', margin: '4px 0 12px', borderRadius: '12px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', border: `1px solid ${ready ? '#2e7d32' : THEME.border}`, backgroundColor: ready ? '#e8f5e9' : '#fff', color: ready ? '#2e7d32' : THEME.text }}>
-                      <input type="checkbox" checked={ready} onChange={() => setProdTags((ready ? picked.filter(x => x !== READY_TAG) : [...picked, READY_TAG]).join(','))} style={{ width: '20px', height: '20px', accentColor: '#2e7d32' }} />
-                      🚚 바로 배송 가능 상품 <span style={{ fontWeight: 'normal', fontSize: '12px', color: THEME.subText }}>(홈에 "바로 배송" 탭이 생기고 상품에 표시됩니다)</span>
-                    </label>
+                    <div style={{ margin: '4px 0 12px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', height: '48px', padding: '0 14px', borderRadius: '12px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', border: `1px solid ${ready ? '#2e7d32' : THEME.border}`, backgroundColor: ready ? '#e8f5e9' : '#fff', color: ready ? '#2e7d32' : THEME.text }}>
+                        <input type="checkbox" checked={ready} onChange={() => setProdTags((ready ? base : [...base, READY_TAG]).join(','))} style={{ width: '20px', height: '20px', accentColor: '#2e7d32' }} />
+                        🚚 바로 배송 가능 상품 <span style={{ fontWeight: 'normal', fontSize: '12px', color: THEME.subText }}>(홈에 "바로 배송" 탭이 생깁니다)</span>
+                      </label>
+                      {showMatrix && (
+                        <div style={{ marginTop: '8px', padding: '10px', borderRadius: '12px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', overflowX: 'auto' }}>
+                          <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 8px' }}>바로 배송이 되는 옵션 칸만 체크하세요. 체크 안 한 칸은 선주문으로 판매됩니다. (옵션 이름을 바꾸면 이 표도 다시 확인하세요)</p>
+                          <table style={{ borderCollapse: 'collapse', fontSize: '13px', minWidth: '100%' }}>
+                            <thead>
+                              <tr>
+                                <th style={{ padding: '4px 6px' }}></th>
+                                {colsS.map(sz => <th key={sz} style={{ padding: '4px 8px', fontWeight: 'normal', color: THEME.subText, whiteSpace: 'nowrap' }}>{sz || '(사이즈 없음)'}</th>)}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rowsC.map(c => (
+                                <tr key={c}>
+                                  <th style={{ padding: '4px 8px', fontWeight: 'normal', color: THEME.subText, textAlign: 'left', whiteSpace: 'nowrap' }}>{c || '(색상 없음)'}</th>
+                                  {colsS.map(sz => {
+                                    const on = isOn(c, sz);
+                                    return <td key={sz} style={{ padding: '3px', textAlign: 'center' }}><button type="button" onClick={() => toggleCell(c, sz)} aria-label={`${c} ${sz} 바로배송 ${on ? '해제' : '지정'}`} style={{ width: '40px', height: '34px', borderRadius: '8px', cursor: 'pointer', border: `1px solid ${on ? '#2e7d32' : THEME.border}`, backgroundColor: on ? '#e8f5e9' : '#fff', color: on ? '#2e7d32' : '#bbb', fontWeight: 'bold' }}>{on ? '🚚' : '–'}</button></td>;
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                            <button type="button" onClick={() => writeSet(new Set(allKeys))} style={A.smallBtn('outline')}>전체 바로배송</button>
+                            <button type="button" onClick={() => writeSet(new Set())} style={A.smallBtn('outline')}>전체 해제</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   );
                 })()}
                 <div>
