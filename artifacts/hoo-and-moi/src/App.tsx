@@ -487,6 +487,7 @@ export default function App() {
   // 새 분류(category2)·기획전 태그 — SQL 05 실행 후
   const [prodCategory2, setProdCategory2] = useState('');
   const [prodTags, setProdTags] = useState('');
+  const [readyEditing, setReadyEditing] = useState(false); // 바로배송 체크만 하고 아직 칸을 고르기 전
 
   const [prodFiles, setProdFiles] = useState<FileList | null>(null); 
   const [subProdFiles, setSubProdFiles] = useState<FileList | null>(null); 
@@ -1182,8 +1183,8 @@ export default function App() {
       resetProductForm(); await fetchProducts(); setAdminTab('productEdit');
     } catch (err: any) { alert("오류 발생: " + err.message); } finally { setIsUploading(false); }
   };
-  const resetProductForm = () => { setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdListPrice(''); setProdSoldout(false); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdCategory2(''); setProdTags(''); setProdBrand(''); setProdFiles(null); setSubProdFiles(null); setInputSubImageUrls(''); setExistingMainImageUrl(''); setImportText(''); };
-  const openEditProduct = (p: any) => { setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdListPrice(p.list_price == null ? '' : String(p.list_price)); setProdSoldout(!!p.is_soldout); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdCategory2(p.category2 || ''); setProdTags((p.tags || []).join(', ')); setProdBrand(p.brand || ''); setExistingMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd'); };
+  const resetProductForm = () => { setReadyEditing(false); setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdListPrice(''); setProdSoldout(false); setProdDesc(''); setProdSizes(''); setProdColors(''); setProdCategory(''); setProdCategory2(''); setProdTags(''); setProdBrand(''); setProdFiles(null); setSubProdFiles(null); setInputSubImageUrls(''); setExistingMainImageUrl(''); setImportText(''); };
+  const openEditProduct = (p: any) => { setReadyEditing(false); setEditingProductId(p.id); setProdName(p.name); setProdPrice(p.price.toString()); setProdCostPrice(p.cost_price ? p.cost_price.toString() : ''); setProdListPrice(p.list_price == null ? '' : String(p.list_price)); setProdSoldout(!!p.is_soldout); setProdDesc(p.description || ''); setProdSizes(p.sizes || ''); setProdColors(p.colors || ''); setProdCategory(p.category || ''); setProdCategory2(p.category2 || ''); setProdTags((p.tags || []).join(', ')); setProdBrand(p.brand || ''); setExistingMainImageUrl(p.main_image || ''); setInputSubImageUrls(p.sub_images || ''); setAdminTab('productAdd'); };
   // 품절 칸(SQL 03) 이 있는지: 관리자 화면은 전체 칸(*)을 불러오므로 첫 상품에 칸이 있으면 사용 가능
   const hasProductExtraColumns = products.length > 0 && 'is_soldout' in products[0];
   const hasCategory2Column = products.length > 0 && 'category2' in products[0];
@@ -2982,7 +2983,7 @@ export default function App() {
                       <label style={A.label}>기획전 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(해당되는 것 체크)</span></label>
                       {(() => {
                         const picked = prodTags.split(',').map(t => t.trim()).filter(Boolean);
-                        const list = Array.from(new Set([...promoList, ...picked])).filter(t => t !== READY_TAG);
+                        const list = Array.from(new Set([...promoList, ...picked])).filter(t => !isReadyTag(t));
                         if (list.length === 0) return <p style={{ ...A.help, margin: '8px 0 0' }}>등록된 기획전이 없습니다. 설정 &gt; 기획전 관리에서 먼저 만들어주세요.</p>;
                         return (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingTop: '4px' }}>
@@ -3004,6 +3005,7 @@ export default function App() {
                 {hasCategory2Column && (() => {
                   const picked = prodTags.split(',').map(t => t.trim()).filter(Boolean);
                   const ready = picked.includes(READY_TAG);
+                  const checked = ready || readyEditing;
                   const base = picked.filter(t => !isReadyTag(t));
                   const colorsT = optionTokens(prodColors), sizesT = optionTokens(prodSizes);
                   const rowsC = colorsT.length ? colorsT : [''], colsS = sizesT.length ? sizesT : [''];
@@ -3021,16 +3023,20 @@ export default function App() {
                     if (cur.has(k)) cur.delete(k); else cur.add(k);
                     writeSet(cur);
                   };
-                  const showMatrix = ready && allKeys.length > 1;
+                  const showMatrix = checked && allKeys.length > 1;
                   return (
                     <div style={{ margin: '4px 0 12px' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', height: '48px', padding: '0 14px', borderRadius: '12px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', border: `1px solid ${ready ? '#2e7d32' : THEME.border}`, backgroundColor: ready ? '#e8f5e9' : '#fff', color: ready ? '#2e7d32' : THEME.text }}>
-                        <input type="checkbox" checked={ready} onChange={() => setProdTags((ready ? base : [...base, READY_TAG]).join(','))} style={{ width: '20px', height: '20px', accentColor: '#2e7d32' }} />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', height: '48px', padding: '0 14px', borderRadius: '12px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', border: `1px solid ${checked ? '#2e7d32' : THEME.border}`, backgroundColor: checked ? '#e8f5e9' : '#fff', color: checked ? '#2e7d32' : THEME.text }}>
+                        <input type="checkbox" checked={checked} onChange={() => {
+                          if (checked) { setProdTags(base.join(',')); setReadyEditing(false); }
+                          else if (allKeys.length > 1) setReadyEditing(true);
+                          else setProdTags([...base, READY_TAG].join(','));
+                        }} style={{ width: '20px', height: '20px', accentColor: '#2e7d32' }} />
                         🚚 바로 배송 가능 상품 <span style={{ fontWeight: 'normal', fontSize: '12px', color: THEME.subText }}>(홈에 "바로 배송" 탭이 생깁니다)</span>
                       </label>
                       {showMatrix && (
                         <div style={{ marginTop: '8px', padding: '10px', borderRadius: '12px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', overflowX: 'auto' }}>
-                          <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 8px' }}>바로 배송이 되는 옵션 칸만 체크하세요. 체크 안 한 칸은 선주문으로 판매됩니다. (옵션 이름을 바꾸면 이 표도 다시 확인하세요)</p>
+                          <p style={{ fontSize: '12px', color: THEME.subText, margin: '0 0 8px' }}>바로 배송이 되는 옵션 칸을 눌러 🚚를 표시하세요. 표시 안 한 칸은 선주문으로 판매됩니다. (옵션 이름을 바꾸면 이 표도 다시 확인하세요)</p>
                           <table style={{ borderCollapse: 'collapse', fontSize: '13px', minWidth: '100%' }}>
                             <thead>
                               <tr>
