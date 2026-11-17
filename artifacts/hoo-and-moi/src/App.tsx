@@ -238,6 +238,8 @@ const NEW_CATEGORIES: Record<string, string[]> = {
 };
 // 예전 분류 중 기획전(분류가 아니라 태그로 옮김)
 const PROMO_OLD_CATEGORIES = ['NEW 할로윈특가', 'CON 콘신상'];
+// 🚚 바로 배송: 기획전 태그와 같은 칸(tags)에 이 이름으로 저장 (기획전 관리 목록에는 나오지 않음)
+const READY_TAG = '바로배송';
 // 예전 분류 → 새 분류 (그대로 옮겨도 되는 것)
 const OLD_TO_NEW: Record<string, string> = {
   '아우터 > 코트': '아우터 > 자켓/코트', '아우터 > 자켓': '아우터 > 자켓/코트', '아우터 > 점퍼': '아우터 > 패딩/점퍼',
@@ -802,7 +804,7 @@ export default function App() {
   const tagCounts: Record<string, number> = {};
   if (useNewCategory) products.forEach(p => (p.tags || []).forEach((t: string) => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
   // 기획전 목록: 설정에서 관리하는 목록(순서 유지) + 상품에 붙어 있는 태그
-  const promoList: string[] = Array.from(new Set([...(homeLayout.promo_list || []), ...products.flatMap((p: any) => p.tags || [])]));
+  const promoList: string[] = Array.from(new Set([...(homeLayout.promo_list || []), ...products.flatMap((p: any) => p.tags || [])])).filter(t => t !== READY_TAG);
   const homeTags = promoList.filter(t => tagCounts[t]);
   const homeBrands = orderBySaved(Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko')), b => b.name, homeLayout.brand_order);
 
@@ -1096,6 +1098,19 @@ export default function App() {
     if (!window.confirm(`중분류 '${sub}' 을(를) 삭제할까요? (상품이 없는 분류입니다)`)) return;
     const t = treeCopy(); t[main] = t[main].filter(x => x !== sub);
     await saveLayoutPatch({ category_tree: t });
+  };
+
+  // 🚚 선택한 상품 바로 배송 지정/해제
+  const setReadyForPicked = async (list: any[], on: boolean) => {
+    const targets = list.filter((p: any) => ((p.tags || []).includes(READY_TAG)) !== on);
+    if (targets.length === 0) return alert(on ? "이미 모두 바로 배송으로 지정돼 있습니다." : "바로 배송으로 지정된 상품이 없습니다.");
+    if (!window.confirm(`선택한 상품 ${targets.length.toLocaleString()}개를 바로 배송 ${on ? '상품으로 지정' : '에서 해제'}할까요?`)) return;
+    setManageBusy(true);
+    try {
+      await updateProductsBatch(targets.map((p: any) => ({ id: p.id, patch: { tags: on ? [...(p.tags || []), READY_TAG] : (p.tags || []).filter((t: string) => t !== READY_TAG) } })));
+      setAdminPicked({});
+      await fetchProducts();
+    } catch (e: any) { alert("저장 실패: " + e.message); } finally { setManageBusy(false); }
   };
 
   // 🏷️ 브랜드 이름 바꾸기 (상품에 적힌 브랜드도 같이 바뀜)
@@ -2016,6 +2031,7 @@ export default function App() {
             <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -20px', padding: '0 20px 10px' }}>
               <button onClick={selectAllTab} style={chipStyle(isAllTab, 'main')}>전체</button>
               <button onClick={selectBrandTab} style={chipStyle(isBrandTab, 'main')}>브랜드</button>
+              {tagCounts[READY_TAG] > 0 && <button onClick={() => selectTagTab(READY_TAG)} style={chipStyle(activeTag === READY_TAG, 'main')}>🚚 바로 배송</button>}
               {homeTags.map(t => (
                 <button key={`tag-${t}`} onClick={() => selectTagTab(t)} style={chipStyle(activeTag === t, 'main')}>🎁 {t}</button>
               ))}
@@ -2059,6 +2075,7 @@ export default function App() {
                         <div style={{ position: 'relative', marginBottom: small ? '6px' : '10px' }}>
                           <img src={p.main_image} loading="lazy" style={{ width: '100%', borderRadius: small ? '8px' : '12px', aspectRatio: '4/5', objectFit: 'cover', backgroundColor: '#eee', display: 'block', filter: soldout ? 'grayscale(0.6)' : 'none' }} />
                           {!soldout && isNewProduct(p.created_at) && <span style={{ position: 'absolute', top: small ? '5px' : '8px', left: small ? '5px' : '8px', backgroundColor: THEME.primary, color: 'white', padding: small ? '2px 6px' : '3px 8px', borderRadius: '5px', fontSize: small ? '9px' : '10px', fontWeight: 'bold' }}>NEW</span>}
+                          {!soldout && (p.tags || []).includes(READY_TAG) && <span style={{ position: 'absolute', bottom: small ? '5px' : '8px', left: small ? '5px' : '8px', backgroundColor: 'rgba(46,125,50,0.92)', color: 'white', padding: small ? '2px 6px' : '3px 8px', borderRadius: '5px', fontSize: small ? '9px' : '10px', fontWeight: 'bold' }}>🚚 바로배송</span>}
                           {soldout && (
                             <div style={{ position: 'absolute', inset: 0, borderRadius: small ? '8px' : '12px', backgroundColor: 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               <span style={{ backgroundColor: 'rgba(40,40,40,0.82)', color: '#fff', padding: small ? '4px 8px' : '6px 12px', borderRadius: '6px', fontSize: small ? '11px' : '13px', fontWeight: 'bold', letterSpacing: '1px' }}>SOLD OUT</span>
@@ -2139,6 +2156,7 @@ export default function App() {
           </div>
           <div style={{ padding: '24px 20px' }}>
             {isNewProduct(selectedProduct.created_at) && <span style={{ display: 'inline-block', backgroundColor: THEME.primary, color: 'white', padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px' }}>✨ NEW</span>}
+            {(selectedProduct.tags || []).includes(READY_TAG) && <span style={{ display: 'inline-block', backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', marginBottom: '10px', marginLeft: isNewProduct(selectedProduct.created_at) ? '6px' : 0 }}>🚚 바로 배송</span>}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
               <h2 style={{ fontSize: '22px', margin: 0, fontWeight: 'bold', lineHeight: '1.4' }}>{selectedProduct.name}</h2>
               <button onClick={handleShareProduct} style={{ backgroundColor: THEME.bg, border: `1px solid ${THEME.border}`, borderRadius: '50%', width: '36px', height: '36px', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0, marginLeft: '10px' }}>
@@ -2930,7 +2948,7 @@ export default function App() {
                       <label style={A.label}>기획전 <span style={{ fontWeight: 'normal', color: THEME.subText }}>(해당되는 것 체크)</span></label>
                       {(() => {
                         const picked = prodTags.split(',').map(t => t.trim()).filter(Boolean);
-                        const list = Array.from(new Set([...promoList, ...picked]));
+                        const list = Array.from(new Set([...promoList, ...picked])).filter(t => t !== READY_TAG);
                         if (list.length === 0) return <p style={{ ...A.help, margin: '8px 0 0' }}>등록된 기획전이 없습니다. 설정 &gt; 기획전 관리에서 먼저 만들어주세요.</p>;
                         return (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingTop: '4px' }}>
@@ -2949,6 +2967,16 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {hasCategory2Column && (() => {
+                  const picked = prodTags.split(',').map(t => t.trim()).filter(Boolean);
+                  const ready = picked.includes(READY_TAG);
+                  return (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', height: '48px', padding: '0 14px', margin: '4px 0 12px', borderRadius: '12px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', border: `1px solid ${ready ? '#2e7d32' : THEME.border}`, backgroundColor: ready ? '#e8f5e9' : '#fff', color: ready ? '#2e7d32' : THEME.text }}>
+                      <input type="checkbox" checked={ready} onChange={() => setProdTags((ready ? picked.filter(x => x !== READY_TAG) : [...picked, READY_TAG]).join(','))} style={{ width: '20px', height: '20px', accentColor: '#2e7d32' }} />
+                      🚚 바로 배송 가능 상품 <span style={{ fontWeight: 'normal', fontSize: '12px', color: THEME.subText }}>(홈에 "바로 배송" 탭이 생기고 상품에 표시됩니다)</span>
+                    </label>
+                  );
+                })()}
                 <div>
                   <label style={A.label}>상품명 <span style={{ color: THEME.primary }}>*</span></label>
                   <input placeholder="상품명을 입력하세요" value={prodName} onChange={e => setProdName(e.target.value)} style={{ ...A.input, fontWeight: 'bold' }} />
@@ -3077,6 +3105,12 @@ export default function App() {
                       <button disabled={bulkDeleting || pickedList.length === 0} onClick={() => setAdminPicked({})} style={A.smallBtn('outline')}>선택 비우기</button>
                       <button disabled={bulkDeleting || pickedList.length === 0} onClick={() => bulkDeleteProducts(pickedList, '선택한 상품')} style={{ ...A.smallBtn('danger'), opacity: pickedList.length === 0 ? 0.5 : 1 }}><Trash2 size={12} /> {bulkDeleting ? '삭제 중...' : `선택 ${pickedList.length.toLocaleString()}개 삭제`}</button>
                     </div>
+                    {hasCategory2Column && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px' }}>
+                        <button disabled={bulkDeleting || manageBusy || pickedList.length === 0} onClick={() => setReadyForPicked(pickedList, true)} style={{ ...A.smallBtn('outline'), opacity: pickedList.length === 0 ? 0.5 : 1 }}>🚚 선택 {pickedList.length.toLocaleString()}개 바로배송 지정</button>
+                        <button disabled={bulkDeleting || manageBusy || pickedList.length === 0} onClick={() => setReadyForPicked(pickedList, false)} style={{ ...A.smallBtn('outline'), opacity: pickedList.length === 0 ? 0.5 : 1 }}>바로배송 해제</button>
+                      </div>
+                    )}
                     {filtered && adminDisplayProducts.length > 0 && (
                       <button disabled={bulkDeleting} onClick={() => bulkDeleteProducts(adminDisplayProducts, '검색 결과 전체')} style={{ ...A.smallBtn('danger'), width: '100%' }}><Trash2 size={12} /> 검색 결과 {adminDisplayProducts.length.toLocaleString()}개 전부 삭제</button>
                     )}
@@ -3100,7 +3134,7 @@ export default function App() {
                               {p.is_soldout && <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, textAlign: 'center', backgroundColor: 'rgba(40,40,40,0.85)', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '0 0 8px 8px', padding: '2px 0' }}>품절</span>}
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <p style={{ fontSize: '11px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.brand || '자체제작'}</p>
+                              <p style={{ fontSize: '11px', fontWeight: 'bold', color: THEME.primary, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.brand || '자체제작'}{(p.tags || []).includes(READY_TAG) && <span style={{ marginLeft: '6px', color: '#2e7d32' }}>🚚</span>}</p>
                               <p style={{ fontSize: '11px', color: THEME.subText, margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{catOf(p) || p.category || '분류 없음'}</p>
                               <p style={{ fontSize: '13px', fontWeight: 'bold', margin: '0 0 3px 0', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-all' }}>{p.name}</p>
                               <p style={{ fontSize: '12px', margin: 0, color: THEME.text }}>{p.price.toLocaleString()}원</p>
