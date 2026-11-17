@@ -470,6 +470,9 @@ export default function App() {
   const [adminEditPage, setAdminEditPage] = useState(1);
   const [adminPicked, setAdminPicked] = useState<Record<string, boolean>>({}); // 선택·일괄 삭제용 체크
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
+  const [trashItems, setTrashItems] = useState<any[]>([]);
+  const [trashBusy, setTrashBusy] = useState(false);
 
   // --- 상품 등록/수정 상태 ---
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -1196,44 +1199,74 @@ export default function App() {
     if (error) return alert("변경 실패: " + error.message);
     setProducts(prev => prev.map(x => x.id === p.id ? { ...x, is_soldout: next } : x));
   };
-  const deleteProduct = async (id: string) => { if (window.confirm("상품을 삭제하시겠습니까?")) { await supabase.from('products').delete().eq('id', id); fetchProducts(); } };
+  // 🗑️ 삭제한 상품은 '삭제된 상품 보관함'으로 옮기고 7일 뒤 완전 삭제 (SQL 10: trash_products / restore_products / purge_products_trash)
+  const trashHint = "\n\n(처음이라면 supabase/updates/10_products_trash.sql 을 먼저 실행해주세요)";
+  const fetchTrash = async () => {
+    await supabase.rpc('purge_products_trash'); // 7일 지난 것 정리 (실패해도 무시)
+    const { data, error } = await supabase.from('products_trash').select('id, data, deleted_at').order('deleted_at', { ascending: false });
+    if (!error && data) setTrashItems(data);
+  };
+  useEffect(() => { if (adminTab === 'productEdit') fetchTrash(); }, [adminTab]);
+  // 100개씩 나눠 처리 (fn: 'trash_products' | 'restore_products')
+  const runTrashRpc = async (fn: string, ids: any[]) => {
+    let done = 0;
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100).map(String);
+      const { error } = await supabase.rpc(fn, { p_ids: chunk });
+      if (error) return { done, error };
+      done += chunk.length;
+    }
+    return { done, error: null as any };
+  };
+  const deleteProduct = async (id: string) => {
+    if (!window.confirm("상품을 삭제하시겠습니까?\n삭제된 상품 보관함으로 옮겨지고, 7일 안에는 복원할 수 있습니다.")) return;
+    const r = await runTrashRpc('trash_products', [id]);
+    if (r.error) return alert("삭제 실패: " + r.error.message + trashHint);
+    await fetchProducts(); fetchTrash();
+  };
 
-  // 여러 상품 한 번에 삭제: 개수·상품명 확인 → (20개 이상이면 '삭제' 직접 입력) → 백업 파일 저장 → 100개씩 삭제
+  // 여러 상품 한 번에 삭제: 개수·상품명 확인 → (50개 이상이면 '삭제' 직접 입력) → 보관함으로 100개씩 이동
   const bulkDeleteProducts = async (targets: any[], label: string) => {
     if (bulkDeleting || targets.length === 0) return;
     const sample = targets.slice(0, 3).map(p => `· ${p.brand ? p.brand + ' ' : ''}${p.name}`).join('\n');
     const more = targets.length > 3 ? `\n… 외 ${(targets.length - 3).toLocaleString()}개` : '';
-    if (!window.confirm(`${label} ${targets.length.toLocaleString()}개를 삭제합니다.\n\n${sample}${more}\n\n삭제 전에 상품 정보를 백업 파일로 저장합니다. 계속할까요?`)) return;
-    if (targets.length >= 20) {
-      const typed = window.prompt(`상품 ${targets.length.toLocaleString()}개를 지웁니다. 계속하려면 "삭제" 라고 입력하세요.`);
+    if (!window.confirm(`${label} ${targets.length.toLocaleString()}개를 삭제합니다.\n\n${sample}${more}\n\n삭제된 상품 보관함으로 옮겨지고, 7일 안에는 복원할 수 있습니다. 계속할까요?`)) return;
+    if (targets.length >= 50) {
+      const typed = window.prompt(`상품 ${targets.length.toLocaleString()}개를 삭제합니다. 계속하려면 "삭제" 라고 입력하세요.`);
       if (typed === null || typed.trim() !== '삭제') return alert("취소했습니다. 삭제하지 않았습니다.");
     }
     setBulkDeleting(true);
     try {
-      // 1) 백업 파일 (되돌릴 때 쓰는 원본 줄 그대로)
-      const d = new Date();
-      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-      const blob = new Blob([JSON.stringify(targets, null, 1)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `상품백업-${stamp}-${targets.length}개.json`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      // 2) 100개씩 삭제
-      const ids = targets.map(p => p.id);
-      let done = 0;
-      for (let i = 0; i < ids.length; i += 100) {
-        const chunk = ids.slice(i, i + 100);
-        const { error } = await supabase.from('products').delete().in('id', chunk);
-        if (error) { alert(`${done.toLocaleString()}개까지 삭제하고 멈췄습니다.\n오류: ${error.message}`); break; }
-        done += chunk.length;
-      }
+      const r = await runTrashRpc('trash_products', targets.map(p => p.id));
       setAdminPicked({});
-      await fetchProducts();
-      if (done === ids.length) alert(`${done.toLocaleString()}개를 삭제했습니다. (백업 파일이 다운로드 폴더에 저장됨)`);
+      await fetchProducts(); fetchTrash();
+      if (r.error) alert(`${r.done.toLocaleString()}개까지 삭제하고 멈췄습니다.\n오류: ${r.error.message}${trashHint}`);
+      else alert(`${r.done.toLocaleString()}개를 삭제했습니다. 상품관리 > 삭제된 상품 보관함에서 7일 안에 복원할 수 있습니다.`);
     } finally {
       setBulkDeleting(false);
     }
+  };
+  const restoreTrashed = async (ids: any[]) => {
+    if (trashBusy || ids.length === 0) return;
+    setTrashBusy(true);
+    try {
+      const r = await runTrashRpc('restore_products', ids);
+      await fetchProducts(); await fetchTrash();
+      if (r.error) alert(`${r.done.toLocaleString()}개까지 복원하고 멈췄습니다.\n오류: ${r.error.message}`);
+      else alert(`${r.done.toLocaleString()}개를 복원했습니다.`);
+    } finally { setTrashBusy(false); }
+  };
+  const purgeTrashed = async (ids: any[], label: string) => {
+    if (trashBusy || ids.length === 0) return;
+    if (!window.confirm(`${label} ${ids.length.toLocaleString()}개를 완전히 삭제합니다.\n이후에는 복원할 수 없습니다. 계속할까요?`)) return;
+    setTrashBusy(true);
+    try {
+      for (let i = 0; i < ids.length; i += 100) {
+        const { error } = await supabase.from('products_trash').delete().in('id', ids.slice(i, i + 100).map(String));
+        if (error) { alert("완전 삭제 실패: " + error.message); break; }
+      }
+      await fetchTrash();
+    } finally { setTrashBusy(false); }
   };
 
   const getExtraPrice = (optStr: string) => {
@@ -3202,10 +3235,43 @@ export default function App() {
                     {filtered && adminDisplayProducts.length > 0 && (
                       <button disabled={bulkDeleting} onClick={() => bulkDeleteProducts(adminDisplayProducts, '검색 결과 전체')} style={{ ...A.smallBtn('danger'), width: '100%' }}><Trash2 size={12} /> 검색 결과 {adminDisplayProducts.length.toLocaleString()}개 전부 삭제</button>
                     )}
-                    <p style={{ fontSize: '11px', color: THEME.subText, margin: 0 }}>선택 {pickedList.length.toLocaleString()}개 · 페이지를 넘겨도 선택이 유지됩니다 · 삭제 전에 백업 파일이 저장돼요</p>
+                    <p style={{ fontSize: '11px', color: THEME.subText, margin: 0 }}>선택 {pickedList.length.toLocaleString()}개 · 페이지를 넘겨도 선택이 유지됩니다 · 삭제하면 보관함으로 이동해 7일 안에 복원할 수 있어요</p>
                   </div>
                 );
               })()}
+
+              {/* 삭제된 상품 보관함 */}
+              <div style={{ ...A.card, padding: '10px 12px', marginBottom: '10px' }}>
+                <button onClick={() => setShowTrash(v => !v)} style={{ ...A.smallBtn('outline'), width: '100%' }}>🗑 삭제된 상품 보관함 ({trashItems.length.toLocaleString()}) {showTrash ? '▲' : '▼'}</button>
+                {showTrash && (
+                  <div style={{ marginTop: '10px' }}>
+                    <p style={{ fontSize: '11px', color: THEME.subText, margin: '0 0 8px' }}>삭제한 상품은 7일 동안 여기에 보관되고, 그 안에는 복원할 수 있습니다. 7일이 지나면 자동으로 완전 삭제됩니다.</p>
+                    {trashItems.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', marginBottom: '8px' }}>
+                        <button disabled={trashBusy} onClick={() => restoreTrashed(trashItems.map(t => t.id))} style={A.smallBtn('outline')}>전체 복원</button>
+                        <button disabled={trashBusy} onClick={() => purgeTrashed(trashItems.map(t => t.id), '보관함의 모든 상품')} style={A.smallBtn('danger')}>보관함 비우기</button>
+                      </div>
+                    )}
+                    {trashItems.length === 0 && <p style={{ fontSize: '13px', color: THEME.subText, textAlign: 'center', margin: '14px 0' }}>보관 중인 상품이 없습니다.</p>}
+                    {trashItems.map(t => {
+                      const d = t.data || {};
+                      const left = Math.max(0, Math.ceil((new Date(t.deleted_at).getTime() + 7 * 86400000 - Date.now()) / 86400000));
+                      return (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0', borderTop: `1px solid ${THEME.border}` }}>
+                          <img src={d.main_image} loading="lazy" style={{ width: '40px', height: '50px', objectFit: 'cover', borderRadius: '6px', backgroundColor: '#eee', flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: '11px', fontWeight: 'bold', color: THEME.primary, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.brand || '자체제작'}</p>
+                            <p style={{ fontSize: '12.5px', margin: '1px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</p>
+                            <p style={{ fontSize: '11px', color: THEME.subText, margin: 0 }}>{left}일 뒤 완전 삭제</p>
+                          </div>
+                          <button disabled={trashBusy} onClick={() => restoreTrashed([t.id])} style={{ ...A.smallBtn('outline'), padding: '0 10px', flexShrink: 0 }}>복원</button>
+                          <button disabled={trashBusy} onClick={() => purgeTrashed([t.id], d.name || '이 상품')} aria-label="완전 삭제" style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', flexShrink: 0 }}><Trash2 size={15} color="#c62828" /></button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {adminCurrentProducts.length > 0 ? (
                 <>
