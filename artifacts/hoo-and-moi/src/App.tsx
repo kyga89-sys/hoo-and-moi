@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { SHOP } from './shop';
-import { XmasDecor, isXmasSeason } from './xmas';
+import { XmasDecor, XmasBanner, isXmasSeason } from './xmas';
 import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, Grid2x2, Grid3x3, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp, ImageIcon, AlertCircle, Eye, EyeOff, Megaphone, Copy, Send, SquarePlus, Ellipsis, EllipsisVertical, ArrowDown, Menu } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
@@ -2087,16 +2087,7 @@ export default function App() {
                ) : ( <div style={{ padding: '40px 20px', textAlign: 'center', backgroundColor: '#f9f9f9', color: THEME.subText, fontSize: '13px' }}>관리자 탭에서 메인 배너를 등록해주세요.</div> )}
             </div>
 
-            {xmasOn && (
-              <button onClick={openXmasPromo} style={{ position: 'relative', display: 'block', width: '100%', border: 'none', borderRadius: '20px', padding: '18px 64px 18px 20px', textAlign: 'left', cursor: 'pointer', backgroundColor: SHOP.xmas.b, color: '#fff', overflow: 'hidden', marginBottom: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' }}>
-                <span aria-hidden="true" style={{ position: 'absolute', right: '-26px', top: '-26px', width: '92px', height: '92px', borderRadius: '50%', backgroundColor: SHOP.xmas.a, opacity: 0.9 }} />
-                <span aria-hidden="true" style={{ position: 'absolute', right: '44px', bottom: '-18px', width: '46px', height: '46px', borderRadius: '50%', backgroundColor: '#fff', opacity: 0.12 }} />
-                <span style={{ position: 'relative', display: 'inline-block', backgroundColor: '#fff', color: SHOP.xmas.b, fontSize: '11px', fontWeight: 'bold', padding: '3px 10px', borderRadius: '10px', marginBottom: '8px' }}>🎄 2026 CHRISTMAS</span>
-                <span style={{ position: 'relative', display: 'block', fontSize: '19px', fontWeight: 'bold', marginBottom: '4px' }}>크리스마스 기획전</span>
-                <span style={{ position: 'relative', display: 'block', fontSize: '12.5px', opacity: 0.92 }}>크리스마스 시즌 상품만 모았어요</span>
-                <span aria-hidden="true" style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', width: '34px', height: '34px', borderRadius: '50%', backgroundColor: '#fff', color: SHOP.xmas.b, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 'bold', lineHeight: 1 }}>›</span>
-              </button>
-            )}
+            {xmasOn && <XmasBanner onClick={openXmasPromo} />}
 
             <div style={{ position: 'relative', marginBottom: '16px' }}>
               <input placeholder="상품명, 브랜드 검색" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ width: '100%', height: '46px', padding: '0 40px 0 42px', borderRadius: '23px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }} />

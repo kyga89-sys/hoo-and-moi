@@ -22,7 +22,7 @@ const Sleigh = ({ gift1, gift2 }: { gift1: string; gift2: string }) => (
     <path d="M60 58 C80 50 100 52 124 58" stroke="#b08a3e" strokeWidth="2" fill="none" />
     {/* 루돌프 2마리 */}
     {[0, 62].map((dx, i) => (
-      <g key={i} transform={`translate(${dx} 0)`}>
+      <g key={i} transform={`translate(${104 + dx} 0) scale(-1 1)`}>
         <path d="M22 70 q-6 -8 -2 -16" stroke="#7a4b2e" strokeWidth="3" fill="none" strokeLinecap="round" />
         <ellipse cx="44" cy="62" rx="22" ry="12" fill="#9a6338" />
         <ellipse cx="44" cy="66" rx="14" ry="6" fill="#c89466" opacity="0.7" />
@@ -120,5 +120,57 @@ export const XmasDecor = () => {
         </div>
       )}
     </>
+  );
+};
+
+// 🎄 홈 배너: 쇼핑몰 분위기에 맞게 다르게 (shop.ts 의 xmas.variant)
+const TreeArt = () => (
+  <svg viewBox="0 0 100 100" width="100%" aria-hidden="true" style={{ display: 'block' }}>
+    <polygon points="50,6 54,17 66,18 57,26 60,38 50,31 40,38 43,26 34,18 46,17" fill="#f3c34f" transform="translate(0 -2) scale(1)" opacity="0" />
+    <path d="M50 8 l4 8 9 1 -7 6 2 9 -8 -5 -8 5 2 -9 -7 -6 9 -1z" fill="#f3c34f" />
+    <polygon points="50,20 68,48 32,48" fill="#2f6b4f" />
+    <polygon points="50,34 74,66 26,66" fill="#3a8160" />
+    <polygon points="50,50 80,84 20,84" fill="#2f6b4f" />
+    <rect x="45" y="84" width="10" height="8" rx="1.5" fill="#7a4b2e" />
+    <circle cx="48" cy="40" r="3.2" fill="#F06A7D" /><circle cx="58" cy="58" r="3.4" fill="#fff" /><circle cx="42" cy="62" r="3.2" fill="#F06A7D" />
+    <circle cx="50" cy="72" r="3.4" fill="#f3c34f" /><circle cx="35" cy="78" r="3" fill="#fff" /><circle cx="65" cy="77" r="3" fill="#F06A7D" />
+    <rect x="6" y="76" width="18" height="16" rx="2.5" fill="#F06A7D" /><path d="M15 76 v16 M6 84 h18" stroke="#fff" strokeWidth="2.2" />
+    <rect x="76" y="80" width="16" height="12" rx="2.5" fill="#fff" stroke="#f3c6cd" /><path d="M84 80 v12 M76 86 h16" stroke="#F06A7D" strokeWidth="2.2" />
+    <g fill="#fff"><circle cx="16" cy="22" r="2" /><circle cx="86" cy="30" r="2.4" /><circle cx="90" cy="58" r="1.8" /><circle cx="10" cy="50" r="1.8" /></g>
+  </svg>
+);
+
+const WreathArt = () => {
+  const leaves = Array.from({ length: 16 }, (_, i) => {
+    const ang = (i / 16) * Math.PI * 2;
+    const x = 50 + 32 * Math.cos(ang), y = 50 + 32 * Math.sin(ang);
+    return <ellipse key={i} cx={x} cy={y} rx="11" ry="5.2" transform={`rotate(${(ang * 180) / Math.PI + 90} ${x} ${y})`} fill={i % 2 ? '#5C7A62' : '#7b9a7f'} />;
+  });
+  return (
+    <svg viewBox="0 0 100 100" width="100%" aria-hidden="true" style={{ display: 'block' }}>
+      {leaves}
+      {[12, 40, 70, 100, 130, 160, 200, 250, 300, 335].map((deg, i) => (
+        <circle key={i} cx={50 + 32 * Math.cos((deg * Math.PI) / 180)} cy={50 + 32 * Math.sin((deg * Math.PI) / 180)} r="3" fill="#b5483f" />
+      ))}
+      <path d="M50 86 l-13 10 4 -14z M50 86 l13 10 -4 -14z" fill="#D29C8B" />
+      <circle cx="50" cy="85" r="4.5" fill="#c4806e" />
+      <g fill="#fff" opacity="0.9"><circle cx="50" cy="50" r="1.6" /><circle cx="42" cy="46" r="1.2" /><circle cx="58" cy="54" r="1.2" /></g>
+    </svg>
+  );
+};
+
+export const XmasBanner = ({ onClick }: { onClick: () => void }) => {
+  const x = SHOP.xmas;
+  const isHoo = x.variant === 'hoo';
+  return (
+    <button onClick={onClick} aria-label={x.title} style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '100%', border: `${isHoo ? 2 : 1.5}px ${isHoo ? 'dashed' : 'solid'} ${x.border}`, borderRadius: '22px', padding: '14px 16px', textAlign: 'left', cursor: 'pointer', backgroundColor: x.bg, marginBottom: '20px', boxShadow: '0 4px 14px rgba(0,0,0,0.05)' }}>
+      <div style={{ width: '84px', flexShrink: 0 }}>{isHoo ? <TreeArt /> : <WreathArt />}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ margin: '0 0 3px', fontSize: '11px', fontWeight: 'bold', letterSpacing: isHoo ? '0.5px' : '2px', color: x.b }}>{x.tag}</p>
+        <p className="serif-text" style={{ margin: '0 0 3px', fontSize: '18px', fontWeight: 700, color: SHOP.theme.brown, lineHeight: 1.3 }}>{x.title}</p>
+        <p style={{ margin: '0 0 10px', fontSize: '12.5px', color: SHOP.theme.subText }}>{x.sub}</p>
+        <span style={{ display: 'inline-block', backgroundColor: isHoo ? x.a : x.b, color: '#fff', fontSize: '12px', fontWeight: 'bold', padding: '6px 14px', borderRadius: isHoo ? '14px' : '4px' }}>{x.cta} ›</span>
+      </div>
+    </button>
   );
 };
