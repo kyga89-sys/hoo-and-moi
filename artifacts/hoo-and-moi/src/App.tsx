@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { SHOP } from './shop';
+import { XmasDecor, isXmasSeason } from './xmas';
 import { ShoppingBag, Home, CheckCircle, ShieldCheck, ImagePlus, Trash2, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileText, LayoutGrid, Grid2x2, Grid3x3, Lock, Plus, Minus, ChevronDown, ChevronUp, Edit, Share, List, X, Download, Scissors, TrendingUp, ImageIcon, AlertCircle, Eye, EyeOff, Megaphone, Copy, Send, SquarePlus, Ellipsis, EllipsisVertical, ArrowDown, Menu } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
@@ -508,7 +509,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState<Record<string, boolean>>({ shop: true });
 
   // --- 홈 화면 배치 (분류 탭·브랜드 순서는 store_settings.home_layout, 상품 순서는 products.display_order) ---
-  const [homeLayout, setHomeLayout] = useState<{ category_order?: string[]; brand_order?: string[]; promo_list?: string[]; category_tree?: Record<string, string[]> }>({});
+  const [homeLayout, setHomeLayout] = useState<{ category_order?: string[]; brand_order?: string[]; promo_list?: string[]; category_tree?: Record<string, string[]>; xmas_off?: boolean }>({});
   const [layoutCats, setLayoutCats] = useState<string[] | null>(null);
   const [layoutBrands, setLayoutBrands] = useState<string[] | null>(null);
   const [layoutProducts, setLayoutProducts] = useState<any[] | null>(null);
@@ -821,6 +822,9 @@ export default function App() {
   // 기획전 목록: 설정에서 관리하는 목록(순서 유지) + 상품에 붙어 있는 태그
   const promoList: string[] = Array.from(new Set([...(homeLayout.promo_list || []), ...products.flatMap((p: any) => p.tags || [])])).filter(t => !isReadyTag(t));
   const homeTags = promoList.filter(t => tagCounts[t]);
+  // 🎄 크리스마스 꾸미기: 2027-01-01 에 자동으로 꺼지고, 설정에서 미리 끌 수도 있음
+  const xmasOn = !homeLayout.xmas_off && isXmasSeason();
+  const xmasPromo = promoList.find(t => t.includes('크리스마스')) || '';
   const homeBrands = orderBySaved(Object.entries(brandCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ko')), b => b.name, homeLayout.brand_order);
 
   const showBrandRow = brandTabOpen || activeBrand !== '전체';
@@ -828,6 +832,11 @@ export default function App() {
   const isAllTab = !showBrandRow && activeLargeCat === '전체' && !activeTag;
   const selectAllTab = () => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat('전체'); setActiveSmallCat('전체'); setActiveTag(''); };
   const selectTagTab = (tag: string) => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveLargeCat('전체'); setActiveSmallCat('전체'); setActiveTag(tag); };
+  const openXmasPromo = () => {
+    if (xmasPromo && tagCounts[xmasPromo] > 0) selectTagTab(xmasPromo);
+    else return alert("크리스마스 기획전 상품을 준비하고 있어요 🎄\n조금만 기다려 주세요!");
+    setTimeout(() => document.getElementById('home-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  };
   const selectBrandTab = () => { setBrandTabOpen(true); setActiveLargeCat('전체'); setActiveSmallCat('전체'); setActiveTag(''); };
   const selectMainCat = (main: string) => { setBrandTabOpen(false); setActiveBrand('전체'); setActiveTag(''); setActiveLargeCat(main); setActiveSmallCat('전체'); };
 
@@ -2034,6 +2043,8 @@ export default function App() {
         </div>
       )}
 
+      {xmasOn && currentView !== 'admin' && currentView !== 'adminLogin' && <XmasDecor />}
+
       {/* 머리글: 좌우 칸 너비를 같게(84px) 해서 상호가 정확히 가운데 */}
       <header style={{ display: 'grid', gridTemplateColumns: '84px 1fr 84px', alignItems: 'center', height: '60px', padding: '0 16px', backgroundColor: '#fff', position: 'sticky', top: 0, zIndex: 100, borderBottom: `1px solid ${THEME.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
@@ -2064,6 +2075,7 @@ export default function App() {
       {currentView === 'home' && (
         <div>
           <div style={{ padding: '30px 20px 0 20px', textAlign: 'center' }}>
+            {xmasOn && <p style={{ margin: '-10px 0 16px', fontSize: '13px', fontWeight: 'bold', letterSpacing: '1px', color: SHOP.xmas.b }}>🎄 Merry Christmas 🎄</p>}
             <p className="serif-text" style={{ color: THEME.brown, fontSize: '17px', marginBottom: '20px', lineHeight: '1.5', whiteSpace: 'pre-line' }}>{introMain}</p>
             <p className="serif-text" style={{ color: THEME.brown, fontSize: '14px', marginBottom: '30px', whiteSpace: 'pre-line' }}>{introSub}</p>
           </div>
@@ -2075,6 +2087,17 @@ export default function App() {
                ) : ( <div style={{ padding: '40px 20px', textAlign: 'center', backgroundColor: '#f9f9f9', color: THEME.subText, fontSize: '13px' }}>관리자 탭에서 메인 배너를 등록해주세요.</div> )}
             </div>
 
+            {xmasOn && (
+              <button onClick={openXmasPromo} style={{ position: 'relative', display: 'block', width: '100%', border: 'none', borderRadius: '20px', padding: '18px 64px 18px 20px', textAlign: 'left', cursor: 'pointer', backgroundColor: SHOP.xmas.b, color: '#fff', overflow: 'hidden', marginBottom: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' }}>
+                <span aria-hidden="true" style={{ position: 'absolute', right: '-26px', top: '-26px', width: '92px', height: '92px', borderRadius: '50%', backgroundColor: SHOP.xmas.a, opacity: 0.9 }} />
+                <span aria-hidden="true" style={{ position: 'absolute', right: '44px', bottom: '-18px', width: '46px', height: '46px', borderRadius: '50%', backgroundColor: '#fff', opacity: 0.12 }} />
+                <span style={{ position: 'relative', display: 'inline-block', backgroundColor: '#fff', color: SHOP.xmas.b, fontSize: '11px', fontWeight: 'bold', padding: '3px 10px', borderRadius: '10px', marginBottom: '8px' }}>🎄 2026 CHRISTMAS</span>
+                <span style={{ position: 'relative', display: 'block', fontSize: '19px', fontWeight: 'bold', marginBottom: '4px' }}>크리스마스 기획전</span>
+                <span style={{ position: 'relative', display: 'block', fontSize: '12.5px', opacity: 0.92 }}>크리스마스 시즌 상품만 모았어요</span>
+                <span aria-hidden="true" style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', width: '34px', height: '34px', borderRadius: '50%', backgroundColor: '#fff', color: SHOP.xmas.b, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 'bold', lineHeight: 1 }}>›</span>
+              </button>
+            )}
+
             <div style={{ position: 'relative', marginBottom: '16px' }}>
               <input placeholder="상품명, 브랜드 검색" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ width: '100%', height: '46px', padding: '0 40px 0 42px', borderRadius: '23px', border: `1px solid ${THEME.border}`, backgroundColor: '#fff', fontSize: '14px' }} />
               <Search size={18} color={THEME.subText} style={{ position: 'absolute', left: '16px', top: '14px' }} />
@@ -2082,7 +2105,7 @@ export default function App() {
             </div>
 
             {/* 1단 탭: 전체 | 브랜드 | 대분류 (상품이 있는 분류만) */}
-            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -20px', padding: '0 20px 10px' }}>
+            <div id="home-tabs" style={{ scrollMarginTop: '70px',  display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -20px', padding: '0 20px 10px' }}>
               <button onClick={selectAllTab} style={chipStyle(isAllTab, 'main')}>전체</button>
               <button onClick={selectBrandTab} style={chipStyle(isBrandTab, 'main')}>브랜드</button>
               {tagCounts[READY_TAG] > 0 && <button onClick={() => selectTagTab(READY_TAG)} style={chipStyle(activeTag === READY_TAG, 'main')}>🚚 바로 배송</button>}
@@ -3751,6 +3774,23 @@ export default function App() {
                     </div>
                   );
                 })()}
+              </div>
+
+              {/* 시즌 꾸미기 (크리스마스) */}
+              <div style={A.card}>
+                {settingsHeader('xmas', '시즌 꾸미기 (크리스마스) ' + (xmasOn ? '· 켜짐' : '· 꺼짐'), '위쪽 띠지 · 눈 · 산타 썰매 · 기획전 배너')}
+                {settingsOpen.xmas && (
+                  <div style={{ marginTop: '16px' }}>
+                    <p style={{ ...A.help, margin: '0 0 12px' }}>{isXmasSeason() ? '12월 31일까지 보이고, 2027년 1월 1일에 자동으로 꺼집니다.' : '기간이 끝나 자동으로 꺼져 있습니다. (2027년 1월 1일 이후)'}</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px', marginBottom: '12px' }}>
+                      <button disabled={manageBusy || !isXmasSeason()} onClick={() => saveLayoutPatch({ xmas_off: false })} style={{ ...A.btn(!homeLayout.xmas_off ? 'dark' : 'outline', false) }}>켜기</button>
+                      <button disabled={manageBusy} onClick={() => saveLayoutPatch({ xmas_off: true })} style={{ ...A.btn(homeLayout.xmas_off ? 'dark' : 'outline', false) }}>끄기</button>
+                    </div>
+                    <p style={{ fontSize: '13px', margin: '0 0 8px' }}>🎄 크리스마스 기획전: {xmasPromo ? <strong>'{xmasPromo}' ({(products.filter((p: any) => (p.tags || []).includes(xmasPromo)).length).toLocaleString()}개)</strong> : <span style={{ color: THEME.subText }}>아직 없음</span>}</p>
+                    {!xmasPromo && <button disabled={manageBusy} onClick={() => saveLayoutPatch({ promo_list: [...promoList, '크리스마스'] })} style={{ ...A.smallBtn('dark'), marginBottom: '8px' }}>'크리스마스' 기획전 만들기</button>}
+                    <p style={A.help}>홈의 크리스마스 배너를 누르면 이 기획전 상품만 보입니다. 상품 등록·수정 화면의 "기획전"에서 '크리스마스'를 체크한 상품이 모입니다. 이름에 '크리스마스'가 들어간 기획전이면 됩니다.</p>
+                  </div>
+                )}
               </div>
 
               {/* 기획전 관리 */}

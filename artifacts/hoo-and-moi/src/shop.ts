@@ -10,6 +10,8 @@ export const SHOP = {
   // 📱 아이폰 기린 수집기 단축어 iCloud 링크 (있으면 관리자 수집함에 [단축어 추가하기] 버튼)
   iosShortcutUrl: 'https://www.icloud.com/shortcuts/d34f067563064f2a971ab942c218ddef',
   shippingFee: 3500,
+  // 🎄 크리스마스 꾸미기 색: a = 띠지·장식(쇼핑몰 대표색), b = 초록(띠지·배너)
+  xmas: { a: '#F06A7D', b: '#2F6B4F' },
   introMain: '매일매일 입고 싶은 옷,\n고민 없이 후앤모아 🎈',
   introSub: '편안함에 감성을 더한\n우리 아이 맞춤 옷장🎀',
   theme: {
